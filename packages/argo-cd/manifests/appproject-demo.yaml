@@ -8,10 +8,10 @@ metadata:
 spec:
   description: For the demo
   sourceRepos:
-    - '*'
+    - "*"
   clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
+    - group: "*"
+      kind: "*"
   destinations:
     - namespace: demo
       server: https://kubernetes.default.svc

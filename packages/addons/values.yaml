@@ -6,20 +6,18 @@ argocd:
   defaultVersion: "8.0.14"
   chartRepository: "https://argoproj.github.io/argo-helm"
   valuesObject:
-    cnoe_ref_impl: # Specific values for reference CNOE implementation to control extraObjects.
-      auto_mode: '{{ if eq .metadata.labels.auto_mode "true" }}true{{ else }}false{{ end }}'
     global:
-      domain: '{{ if eq .metadata.labels.path_routing "true" }}{{ .metadata.annotations.domain }}{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
+      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
     server:
       ingress:
-        annotations: 
-          cert-manager.io/cluster-issuer: '{{ if eq .metadata.labels.path_routing "false" }}letsencrypt-prod{{ end }}'
-        path: '/{{ if eq .metadata.labels.path_routing "true" }}argocd{{ end }}'
+        annotations:
+          cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
+        path: '/{{ if eq .metadata.annotations.pathRouting "true" }}argocd{{ end }}'
     configs:
       cm:
         oidc.config: |
           name: Keycloak
-          issuer: https://{{ if eq .metadata.labels.path_routing "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe
+          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe
           clientID: argocd
           enablePKCEAuthentication: true
           requestedScopes:
@@ -28,46 +26,126 @@ argocd:
             - email
             - groups
       params:
-        'server.basehref': '/{{ if eq .metadata.labels.path_routing "true" }}argocd{{ end }}'
-        'server.rootpath': '{{ if eq .metadata.labels.path_routing "true" }}argocd{{ end }}'
+        "server.basehref": '/{{ if eq .metadata.annotations.pathRouting "true" }}argocd{{ end }}'
+        "server.rootpath": '{{ if eq .metadata.annotations.pathRouting "true" }}argocd{{ end }}'
   additionalResources:
-  - manifestPath: "manifests"
-    type: "manifests"
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane-bootstrap', 'control-plane']
+        values: ["control-plane-bootstrap", "control-plane"]
 
-aws-load-balancer-controller:
+crossplane:
   enabled: true
-  # enableAckPodIdentity: true
-  namespace: kube-system
-  defaultVersion: "1.13.2"
-  chartRepository: "https://aws.github.io/eks-charts"
-  valuesObject:
-    serviceAccount:
-      name:  "aws-load-balancer-controller"
-    # vpcId: '{{.metadata.annotations.aws_vpc_id}}'
-    clusterName: '{{ .metadata.labels.clusterName }}'
-  ignoreDifferences:
-    - kind: Secret
-      name: aws-load-balancer-tls
-      jsonPointers: [/data]
-    - group: admissionregistration.k8s.io
-      kind: MutatingWebhookConfiguration
-      jqPathExpressions: ['.webhooks[].clientConfig.caBundle']
-    - group: admissionregistration.k8s.io
-      kind: ValidatingWebhookConfiguration
-      jqPathExpressions: ['.webhooks[].clientConfig.caBundle']
+  chartName: crossplane
+  namespace: crossplane-system
+  releaseName: crossplane
+  defaultVersion: "2.0.2-up.4"
+  chartRepository: "https://charts.upbound.io/stable"
   selector:
     matchExpressions:
-      - key: auto_mode
-        operator: In
-        values: ['false']
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
+
+crossplane-config:
+  enabled: true
+  chartName: raw
+  namespace: crossplane-system
+  releaseName: crossplane-xrs
+  defaultVersion: "0.1.0"
+  chartRepository: "{{ .metadata.annotations.addonsRepoURL }}"
+  path: packages/charts/raw
+  valuesObject:
+    templates:
+      - apiVersion: azure.m.upbound.io/v1beta1
+        kind: ClusterProviderConfig
+        metadata:
+          name: default
+        spec:
+          credentials:
+            source: Secret
+            secretRef:
+              name: provider-azure
+              namespace: crossplane-system
+              key: credentials
+      - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+        kind: ClusterProviderConfig
+        metadata:
+          name: default
+          namespace: crossplane-system
+        spec:
+          credentials:
+            source: InjectedIdentity
+  selector:
+    matchExpressions:
+      - key: environment
+        operator: In
+        values: ["control-plane"]
+
+crossplane-xrs:
+  enabled: true
+  chartName: raw
+  namespace: crossplane-system
+  releaseName: crossplane-xrs
+  defaultVersion: "0.1.0"
+  chartRepository: "{{ .metadata.annotations.addonsRepoURL }}"
+  path: packages/charts/raw
+  valuesObject:
+    templates:
+      - apiVersion: azure.livewyer.io/v1alpha1
+        kind: WorkloadIdentity
+        metadata:
+          name: external-dns
+          namespace: external-dns
+        spec:
+          forProvider:
+            location: "{{ .metadata.annotations.location }}"
+            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
+            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
+            roleAssignments:
+              - roleDefinitionName: DNS Zone Contributor
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+              - roleDefinitionName: Reader
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+            serviceAccountName: external-dns
+      - apiVersion: azure.livewyer.io/v1alpha1
+        kind: WorkloadIdentity
+        metadata:
+          name: external-secrets
+          namespace: external-secrets
+        spec:
+          forProvider:
+            location: "{{ .metadata.annotations.location }}"
+            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
+            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
+            roleAssignments:
+              - roleDefinitionName: Key Vault Secrets User
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+            serviceAccountName: external-secrets
+      - apiVersion: azure.livewyer.io/v1alpha1
+        kind: WorkloadIdentity
+        metadata:
+          name: keycloak-eso-store
+          namespace: keycloak
+        spec:
+          forProvider:
+            location: "{{ .metadata.annotations.location }}"
+            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
+            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
+            roleAssignments:
+              - roleDefinitionName: Key Vault Secrets User
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+              - roleDefinitionName: Key Vault Reader
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+            serviceAccountName: eso-store
+  selector:
+    matchExpressions:
+      - key: environment
+        operator: In
+        values: ["control-plane"]
 
 ingress-nginx:
   enabled: true
@@ -80,7 +158,7 @@ ingress-nginx:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
 
 external-dns:
   enabled: true
@@ -90,13 +168,15 @@ external-dns:
   chartRepository: https://kubernetes-sigs.github.io/external-dns
   defaultVersion: "1.16.1"
   valuesObject:
-    zoneIdFilters:
-      - '{{ .metadata.annotations.route53_hosted_zone_id }}'
+    provider:
+      name: azure
+    domainFilters:
+      - "{{ .metadata.annotations.domain }}"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
 
 external-secrets:
   enabled: true
@@ -106,13 +186,13 @@ external-secrets:
   defaultVersion: "0.17.0"
   chartRepository: "https://charts.external-secrets.io"
   additionalResources:
-  - manifestPath: "manifests"
-    type: "manifests"
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane-bootstrap', 'control-plane']
+        values: ["control-plane-bootstrap", "control-plane"]
 
 cert-manager:
   enabled: true
@@ -123,14 +203,14 @@ cert-manager:
   chartRepository: "https://charts.jetstack.io"
   valuesObject:
     global:
-      domainName: '{{ if eq .metadata.labels.path_routing "true" }}{{ .metadata.annotations.domain }}{{ end }}'
-      pathRouting: '{{ if eq .metadata.labels.path_routing "true" }}true{{ else }}false{{ end }}'
+      domainName: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ end }}'
+      pathRouting: '{{ if eq .metadata.annotations.pathRouting "true" }}true{{ else }}false{{ end }}'
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
-        
+        values: ["control-plane"]
+
 keycloak:
   enabled: true
   chartName: keycloak
@@ -139,23 +219,23 @@ keycloak:
   defaultVersion: "24.7.3"
   chartRepository: "https://charts.bitnami.com/bitnami"
   valuesObject:
-    httpRelativePath: '/{{ if eq .metadata.labels.path_routing "true" }}keycloak/{{ end }}'
+    httpRelativePath: '/{{ if eq .metadata.annotations.pathRouting "true" }}keycloak/{{ end }}'
     ingress:
-      hostname: '{{ if eq .metadata.labels.path_routing "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
-      annotations: 
-        cert-manager.io/cluster-issuer: '{{ if eq .metadata.labels.path_routing "false" }}letsencrypt-prod{{ end }}'
+      hostname: '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
+      annotations:
+        cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
       extraTls:
-      - hosts:
-        - '{{ if eq .metadata.labels.path_routing "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
-        secretName: keycloak-server-tls
+        - hosts:
+            - '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
+          secretName: keycloak-server-tls
   additionalResources:
-  - manifestPath: "manifests"
-    type: "manifests"
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
 
 backstage:
   enabled: true
@@ -166,32 +246,32 @@ backstage:
   chartRepository: "https://backstage.github.io/charts"
   valuesObject:
     ingress:
-      host: '{{ if eq .metadata.labels.path_routing "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
-      annotations: 
-        cert-manager.io/cluster-issuer: '{{ if eq .metadata.labels.path_routing "false" }}letsencrypt-prod{{ end }}'
+      host: '{{ if eq .metadata.annotations.pathRouting "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
+      annotations:
+        cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
     backstage:
       appConfig:
         catalog:
           locations:
             - type: url
-              target: '{{ .metadata.annotations.addons_repo_url }}/blob/{{ .metadata.annotations.addons_repo_revision }}/templates/backstage/catalog-info.yaml'
+              target: "{{ .metadata.annotations.addonsRepoURL }}/blob/{{ .metadata.annotations.addonsRepoRevision }}/templates/backstage/catalog-info.yaml"
       extraEnvVars:
-      - name: BACKSTAGE_FRONTEND_URL
-        value: 'https://{{ if eq .metadata.labels.path_routing "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
-      - name: KEYCLOAK_NAME_METADATA
-        value: 'https://{{ if eq .metadata.labels.path_routing "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe/.well-known/openid-configuration'
-      - name: ARGO_WORKFLOWS_URL
-        value: 'https://{{ if eq .metadata.labels.path_routing "false" }}argo-workflows.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/argo-workflows{{ end }}'
-      - name: ARGO_CD_URL
-        value: 'https://{{ if eq .metadata.labels.path_routing "false" }}argocd.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/argocd{{ end }}'
+        - name: BACKSTAGE_FRONTEND_URL
+          value: 'https://{{ if eq .metadata.annotations.pathRouting "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
+        - name: KEYCLOAK_NAME_METADATA
+          value: 'https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe/.well-known/openid-configuration'
+        - name: ARGO_WORKFLOWS_URL
+          value: 'https://{{ if eq .metadata.annotations.pathRouting "false" }}argo-workflows.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/argo-workflows{{ end }}'
+        - name: ARGO_CD_URL
+          value: 'https://{{ if eq .metadata.annotations.pathRouting "false" }}argocd.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/argocd{{ end }}'
   additionalResources:
-  - manifestPath: "manifests"
-    type: "manifests"
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
 
 argo-workflows:
   enabled: true
@@ -202,67 +282,30 @@ argo-workflows:
   chartRepository: "https://argoproj.github.io/argo-helm"
   valuesObject:
     server:
-      baseHref: '/{{ if eq .metadata.labels.path_routing "true" }}argo-workflows/{{ end }}'
+      baseHref: '/{{ if eq .metadata.annotations.pathRouting "true" }}argo-workflows/{{ end }}'
       sso:
-        issuer: '{{ if eq .metadata.labels.path_routing "true" }}https://{{ .metadata.annotations.domain }}/keycloak{{ else }}https://keycloak.{{ .metadata.annotations.domain }}{{ end }}/realms/cnoe'
-        redirectUrl: '{{ if eq .metadata.labels.path_routing "true" }}https://{{ .metadata.annotations.domain }}/argo-workflows{{ else }}https://argo-workflows.{{ .metadata.annotations.domain }}{{ end }}/oauth2/callback'
+        issuer: '{{ if eq .metadata.annotations.pathRouting "true" }}https://{{ .metadata.annotations.domain }}/keycloak{{ else }}https://keycloak.{{ .metadata.annotations.domain }}{{ end }}/realms/cnoe'
+        redirectUrl: '{{ if eq .metadata.annotations.pathRouting "true" }}https://{{ .metadata.annotations.domain }}/argo-workflows{{ else }}https://argo-workflows.{{ .metadata.annotations.domain }}{{ end }}/oauth2/callback'
       ingress:
-        annotations: 
-          cert-manager.io/cluster-issuer: '{{ if eq .metadata.labels.path_routing "false" }}letsencrypt-prod{{ end }}'
-          nginx.ingress.kubernetes.io/rewrite-target: '{{ if eq .metadata.labels.path_routing "true" }}/$2{{ end }}'
+        annotations:
+          cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
+          nginx.ingress.kubernetes.io/rewrite-target: '{{ if eq .metadata.annotations.pathRouting "true" }}/$2{{ end }}'
         hosts:
-        - '{{ if eq .metadata.labels.path_routing "true" }}{{ .metadata.annotations.domain }}{{ else }}argo-workflows.{{ .metadata.annotations.domain }}{{ end }}'
-        paths: 
-        -  '/{{ if eq .metadata.labels.path_routing "true" }}argo-workflows(/|$)(.*){{ end }}'
+          - '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argo-workflows.{{ .metadata.annotations.domain }}{{ end }}'
+        paths:
+          - '/{{ if eq .metadata.annotations.pathRouting "true" }}argo-workflows(/|$)(.*){{ end }}'
         tls:
-        - hosts:
-          - '{{ if eq .metadata.labels.path_routing "true" }}{{ .metadata.annotations.domain }}{{ else }}argo-workflows.{{ .metadata.annotations.domain }}{{ end }}'
-          secretName: argo-workflows-server-tls
+          - hosts:
+              - '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argo-workflows.{{ .metadata.annotations.domain }}{{ end }}'
+            secretName: argo-workflows-server-tls
   additionalResources:
-  - manifestPath: "manifests"
-    type: "manifests"
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
-
-crossplane:
-  enabled: true
-  chartName: crossplane
-  namespace: crossplane-system
-  releaseName: crossplane
-  defaultVersion: "1.20.0"
-  chartRepository: "https://charts.crossplane.io/stable"
-  selector:
-    matchExpressions:
-      - key: environment
-        operator: In
-        values: ['control-plane']
-
-crossplane-upbound-providers:
-  enabled: true
-  chartName: crossplane-aws-upbound
-  namespace: crossplane-system
-  releaseName: crossplane-upbound-providers
-  defaultVersion: "3.0.0"
-  chartRepository: "https://gitops-bridge-dev.github.io/gitops-bridge-helm-charts"
-  selector:
-    matchExpressions:
-      - key: environment
-        operator: In
-        values: ['control-plane']
-
-crossplane-compositions:
-  enabled: true
-  namespace: crossplane-system
-  type: manifest
-  path: packages/crossplane-compositions
-  selector:
-    matchExpressions:
-      - key: environment
-        operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
 
 syncPolicy:
   automated:

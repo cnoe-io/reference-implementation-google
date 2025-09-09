@@ -14,11 +14,10 @@ spec:
   sources:
     - repoURL: cnoe://
       targetRevision: HEAD
-      path: "appset-chart"
+      path: charts/appset
       helm:
         valueFiles:
           - $values/addons/values.yaml
-          - $values/bootstrap/values-idpbuilder.yaml
     - repoURL: cnoe://
       targetRevision: HEAD
       ref: values
@@ -28,11 +27,11 @@ spec:
       allowEmpty: true
       prune: true
     retry:
-      limit: -1 
+      limit: -1
       backoff:
-        duration: 5s 
-        factor: 2 
+        duration: 5s
+        factor: 2
         maxDuration: 10m
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true 
+      - ServerSideApply=true

@@ -1,0 +1,75 @@
+{{- $config := (readFile "../../config.yaml") | fromYaml -}}
+
+global:
+  domain: {{ ternary $config.domain (printf "argocd.%s" $config.domain) $config.path_routing }}
+
+server:
+  ingress:
+    annotations:
+      {{ if not $config.path_routing -}}
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      {{ end -}}
+    path: {{ ternary "/argocd" "/" $config.path_routing }}
+
+configs:
+  cm:
+    oidc.config: |
+      name: Keycloak
+      issuer: https://{{ ternary (printf "%s/keycloak" $config.domain) (printf "keycloak.%s" $config.domain) $config.path_routing }}/realms/cnoe
+      clientID: argocd
+      enablePKCEAuthentication: true
+      requestedScopes:
+        - openid
+        - profile
+        - email
+        - groups
+  params:
+    'server.basehref': {{ ternary "/argocd" "/" $config.path_routing }}
+    'server.rootpath': {{ ternary "argocd" "" $config.path_routing }}
+
+extraObjects:
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: cnoe
+      labels:
+        argocd.argoproj.io/secret-type: cluster
+        environment: "control-plane"
+      annotations:
+        addonsRepoURL: {{ $config.repo.url }}
+        addonsRepoRevision: {{ $config.repo.revision }}
+        addonsRepoBasepath: {{ $config.repo.basepath }}
+        subscription: {{ $config.subscription }}
+        location: {{ $config.location }}
+        resourceGroup: {{ $config.resource_group }}
+        clusterName: {{ $config.cluster_name }}
+        clusterOIDCIssuerURL: {{ $config.cluster_oidc_issuer_url }}
+        domain: {{ $config.domain }}
+        pathRouting: "{{ $config.path_routing }}"
+        environment: "control-plane"
+    stringData:
+      name: {{ $config.cluster_name }}
+      server: https://kubernetes.default.svc
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: github-app-org
+      labels:
+        argocd.argoproj.io/secret-type: repo-creds
+    stringData:
+      type: git
+      url: {{ $config.github.orgURL }}
+      githubAppID: "{{ $config.github.appId }}"
+      githubAppInstallationID: "{{ $config.github.installationId }}"
+      githubClientID: {{ $config.github.clientId }}
+      githubClientSecret: "{{ $config.github.clientSecret }}"
+      {{ if $config.github.webhookUrl -}}
+      githubWebhookURL: {{ $config.github.webhookUrl }}
+      {{ end -}}
+      {{ if $config.github.webhookSecret }}
+      githubWebhookSecret: {{ $config.github.webhookSecret }}
+      {{ end -}}
+      githubAppPrivateKey: |
+        {{ $config.github.privateKey | nindent 8 }}

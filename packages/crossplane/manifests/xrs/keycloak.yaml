@@ -1,0 +1,16 @@
+apiVersion: azure.livewyer.io/v1alpha1
+kind: WorkloadIdentity
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  forProvider:
+    location: "{{ .location }}"
+    oidcIssuerURL: "{{ .clusterOIDCIssuerURL }}"
+    resourceGroupName: "{{ .resourceGroup }}"
+    roleAssignments:
+      - roleDefinitionName: Key Vault Secrets User
+        scope: "{{ .resourceGroup }}"
+      - roleDefinitionName: Key Vault Reader
+        scope: "{{ .resourceGroup }}"
+    serviceAccountName: external-secret-keycloak

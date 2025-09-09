@@ -1,0 +1,170 @@
+# https://taskfile.dev
+
+version: "3"
+
+set: [errexit, nounset, pipefail]
+
+env:
+  KUBECONFIG:
+    sh: mktemp
+  REPO_ROOT: "{{.ROOT_DIR}}"
+  SECRET_NAME_PREFIX: cnoe-ref-impl
+
+tasks:
+  init:
+    deps:
+      - update:kubeconfig
+    cmds:
+      - defer: { task: cleanup }
+      - task: helmfile:init
+      - task: helmfile:lint
+      - task: helmfile:build
+
+  install:
+    deps:
+      - update:kubeconfig
+    cmds:
+      - defer: { task: cleanup }
+      - task: helmfile
+      - task: update
+
+  sync:
+    deps:
+      - update:kubeconfig
+    cmds:
+      - defer: { task: cleanup }
+      - task: helmfile:sync
+      - task: update:secret
+      - task: update:crossplane
+
+  update:
+    deps:
+      - update:kubeconfig
+    cmds:
+      - defer: { task: cleanup }
+      - task: update:secret
+      - task: update:crossplane
+
+  update:secret:
+    deps:
+      - update:kubeconfig
+    preconditions:
+      - test -f private/azure-credentials.yaml
+    cmds:
+      - defer: { task: cleanup }
+      - kubectl apply -f packages/bootstrap/crossplane-ns.yaml
+      - kubectl apply -f private/azure-credentials.yaml
+      - task: update:secret:azure
+
+  update:secret:azure:
+    preconditions:
+      - test -f config.yaml
+    vars:
+      TAGS:
+        sh: yq eval '.tags | to_entries | map("Key=" + .key + ",Value=" + .value) | join(" ")' config.yaml
+      SECRET_TEMP:
+        sh: mktemp
+    sources:
+      - config.yaml
+    generates:
+      - "{{.SECRET_TEMP}}"
+    cmds:
+      - task: if
+        vars:
+          CONDITION: $(az keyvault list -o yaml | SECRET_NAME_PREFIX=${SECRET_NAME_PREFIX} yq '.[] | [select(.name==env(SECRET_NAME_PREFIX))] | length') -eq 0
+          RUN: az keyvault create --resource-group $(yq '.resource_group' config.yaml) --tags {{.TAGS}} ${SECRET_NAME_PREFIX}
+      - defer: rm -f {{.SECRET_TEMP}}
+      - yq -o=json config.yaml > {{.SECRET_TEMP}}
+      - |
+        az keyvault secret set \
+          --name config \
+          --vault-name ${SECRET_NAME_PREFIX} \
+          --file {{.SECRET_TEMP}} \
+          --description "Secret for config of CNOE Azure Reference Implementation" \
+          --tags {{.TAGS}}
+          --output yaml | yq 'del(.value)'
+
+  update:crossplane:
+    deps:
+      - update:kubeconfig
+    cmds:
+      - defer: { task: cleanup }
+      - task: wait
+        vars:
+          CONDITION: $(kubectl get provider.pkg.crossplane.io -o yaml | yq '[.items[] | select(.metadata.name=="*provider-kubernetes")] | length') -eq 0
+      - task: wait
+        vars:
+          CONDITION: $(kubectl -n crossplane-system get sa -o name | grep provider-kubernetes | wc -l) -eq 0
+      - task: if
+        vars:
+          CONDITION: $(kubectl get clusterrolebindings -o yaml | yq '[.items[] | select(.metadata.name=="provider-kubernetes-admin-binding")] | length') -eq 0
+          RUN: kubectl create clusterrolebinding provider-kubernetes-admin-binding --clusterrole cluster-admin --serviceaccount="$(kubectl -n crossplane-system get sa -o yaml | yq '.items[] | select(.metadata.name=="*provider-kubernetes*") | [.metadata.namespace, .metadata.name] | join(":")')"
+
+  update:kubeconfig:
+    preconditions:
+      - test -f config.yaml
+    cmds:
+      - az aks get-credentials --name $(yq '.cluster_name' config.yaml) --resource-group $(yq '.resource_group' config.yaml) --file "{{.KUBECONFIG}}"
+
+  cleanup:
+    internal: true
+    cmds:
+      - rm -f "{{.KUBECONFIG}}"
+
+  wait:
+    internal: true
+    env:
+      TIMEOUT: "{{default 300 .TIMEOUT}}"
+    cmds:
+      - while [[ {{.CONDITION}} ]] && [[ ${TIMEOUT} -gt 0 ]]; do sleep 5 && ((TIMEOUT-=5)); done
+
+  if:
+    internal: true
+    cmds:
+      - if [[ {{.CONDITION}} ]]; then {{.RUN}}; fi
+
+  uninstall:
+    deps:
+      - update:kubeconfig
+    cmds:
+      - defer: { task: cleanup }
+      - task: update:kubeconfig
+      - task: helmfile:destroy
+
+  helmfile:
+    cmds:
+      - task: helmfile:init
+      - task: helmfile:apply
+  helmfile:init:
+    cmds:
+      - helmfile init {{.CLI_ARGS}}
+  helmfile:lint:
+    cmds:
+      - helmfile lint {{.CLI_ARGS}}
+  helmfile:diff:
+    cmds:
+      - helmfile diff {{.CLI_ARGS}}
+  helmfile:build:
+    cmds:
+      - helmfile build {{.CLI_ARGS}}
+  helmfile:apply:
+    cmds:
+      - helmfile apply {{.CLI_ARGS}}
+  helmfile:list:
+    cmds:
+      - helmfile list {{.CLI_ARGS}}
+  helmfile:status:
+    cmds:
+      - helmfile status {{.CLI_ARGS}}
+  helmfile:template:
+    cmds:
+      - helmfile template {{.CLI_ARGS}}
+  helmfile:deps:
+    cmds:
+      - helmfile deps {{.CLI_ARGS}}
+  helmfile:sync:
+    cmds:
+      - helmfile sync {{.CLI_ARGS}}
+  helmfile:destroy:
+    cmds:
+      - helmfile destroy {{.CLI_ARGS}}

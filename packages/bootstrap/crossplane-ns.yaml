@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: "2025-09-24T09:31:24Z"
+  labels:
+    kubernetes.io/metadata.name: crossplane-system
+  name: crossplane-system

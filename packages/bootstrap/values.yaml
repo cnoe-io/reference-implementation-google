@@ -5,15 +5,15 @@ addons-appset: # for non-path routing
   namespace: argocd
   releaseName: addons
   type: chart
-  path: packages/appset-chart # This path is relative to Github repo root
+  path: packages/charts/appset # This path is relative to Github repo root
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
       - key: path_routing
         operator: In
-        values: ['false']
+        values: ["false"]
 
 addons-appset-pr: # for path routing
   enabled: true
@@ -21,14 +21,14 @@ addons-appset-pr: # for path routing
   namespace: argocd
   releaseName: addons
   type: chart
-  path: packages/appset-chart # This path is relative to Github repo root
-  valueFiles: 
-  - "path-routing-values.yaml"
+  path: packages/charts/appset # This path is relative to Github repo root
+  valueFiles:
+    - "path-routing-values.yaml"
   selector:
     matchExpressions:
       - key: environment
         operator: In
-        values: ['control-plane']
+        values: ["control-plane"]
       - key: path_routing
         operator: In
-        values: ['true']
+        values: ["true"]

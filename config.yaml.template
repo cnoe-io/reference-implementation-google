@@ -1,0 +1,47 @@
+### Config for CNOE Azure Reference Implementation ###
+# Source: "https://github.com/livewyer-ops/reference-implementation-azure"
+
+# Details of your repository fork
+repo:
+  url: "https://github.com/livewyer-ops/reference-implementation-azure" # This is the GITHUB URL of the fork in Github Org that you have created.
+  revision: "v2" # Branch or Tag which should be used for Argo CD Apps
+  basepath: "packages" # Directory in which configuration of addons is stored
+
+# The name of the AKS cluster you are installing the reference implementation on.
+cluster_name: "cnoe-ref-impl"
+# Azure Region of the AKS cluster and cnoe-reference-implementation-azure config secret
+subscription: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
+location: eastus
+resource_group: cnoe-idp
+
+# AKS cluster OIDC issuer URL
+cluster_oidc_issuer_url: https://eastus.oic.prod-aks.azure.com/00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111/
+
+# Base Domain name used for exposing services. It should be a subdomain or main domain of the DNS zone.
+domain: <REPLACE_ME_example.com>
+
+# Set this to "true" if you want to enable path routing othewise "false" for domain based routing.
+# When enabled, the exposed addons will be accessible at https://<domain_name>/<addon-name>
+# When disabled, the exposed addons will be accessible at https://<addon-name>.<domain_name>
+# !!! Note: This is a string value as it is passed on to the Argo CD cluster secret as label
+path_routing: false
+
+github:
+  appId: "<REPLACE_ME_12345678>"
+  installationId: "<REPLACE_ME_12345678>"
+  orgURL: https://github.com/<<REPLACE_ME_your_org>
+  clientId: <REPLACE_ME_clientId>
+  clientSecret: <REPLACE_ME_clientSecret>
+  webhookUrl: <REPLACE_ME_webhookUrl>
+  webhookSecret: <REPLACE_ME_webhookSecret>
+  privateKey: |
+    -----BEGIN RSA PRIVATE KEY-----
+    ...
+    -----END RSA PRIVATE KEY-----
+
+
+# Tags for AWS resources
+tags:
+  githubRepo: "github.com/livewyer-ops/reference-implementation-azure"
+  env: "dev"
+  project: "cnoe"

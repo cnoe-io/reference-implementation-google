@@ -1,0 +1,33 @@
+helmDefaults:
+  cleanupOnFail: true
+  createNamespace: true
+  wait: true
+
+repositories:
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+
+releases:
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    version: '{{ ((readFile (printf "%s/%s" (requiredEnv "REPO_ROOT") "packages/addons/values.yaml")) | fromYaml).argocd.defaultVersion }}'
+    values:
+      - packages/argo-cd/values.yaml
+      - packages/argo-cd/values.yaml.gotmpl
+  - name: cnoe-argocd-config
+    namespace: argocd
+    chart: packages/charts/raw
+    values:
+      - packages/bootstrap/argocd.yaml.gotmpl
+    disableValidationOnInstall: true
+    needs:
+      - argocd/argocd
+  - name: cnoe-appset
+    namespace: argocd
+    chart: packages/charts/appset
+    values:
+      - packages/addons/values.yaml
+    disableValidationOnInstall: true
+    needs:
+      - argocd/cnoe-argocd-config
