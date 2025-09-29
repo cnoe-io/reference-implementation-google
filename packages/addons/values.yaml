@@ -172,6 +172,9 @@ external-dns:
       name: azure
     domainFilters:
       - "{{ .metadata.annotations.domain }}"
+  additionalResources:
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment

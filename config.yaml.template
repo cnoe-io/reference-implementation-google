@@ -20,6 +20,9 @@ cluster_oidc_issuer_url: https://eastus.oic.prod-aks.azure.com/00000000-0000-000
 # Base Domain name used for exposing services. It should be a subdomain or main domain of the DNS zone.
 domain: <REPLACE_ME_example.com>
 
+# Azure Key Vault to use to store config secrets and certs
+keyvault: cnoe-ref-impl
+
 # Set this to "true" if you want to enable path routing othewise "false" for domain based routing.
 # When enabled, the exposed addons will be accessible at https://<domain_name>/<addon-name>
 # When disabled, the exposed addons will be accessible at https://<addon-name>.<domain_name>
@@ -39,6 +42,12 @@ github:
     ...
     -----END RSA PRIVATE KEY-----
 
+crossplane_workload_identity:
+  create: true
+  clientId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
+  tenantId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
+
+letsencrypt_env: prod
 
 # Tags for AWS resources
 tags:

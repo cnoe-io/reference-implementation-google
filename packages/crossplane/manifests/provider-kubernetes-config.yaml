@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: provider-kubernetes-config
+  namespace: crossplane-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+spec:
+  template:
+    spec:
+      serviceAccountName: upbound-controller-manager
+      restartPolicy: Never
+      containers:
+        - name: provider-kubernetes-config
+          image: docker.io/bitnamilegacy/kubectl
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              #! /bin/bash
+              set -e -o pipefail
+
+              while [[ $(kubectl -n crossplane-system get sa -o yaml | yq '[.items[] | select(.metadata.name=="*provider-kubernetes*")] | length') -eq 0 ]]; do
+                sleep 5
+              done
+              SA=$(kubectl -n crossplane-system get sa -o yaml | yq '.items[] | select(.metadata.name=="*provider-kubernetes*").metadata.name')
+              kubectl create clusterrolebinding provider-kubernetes-admin-binding \
+                --clusterrole cluster-admin \
+                --serviceaccount="crossplane-system:${SA}" && \
+              echo "Done" || echo "Error"

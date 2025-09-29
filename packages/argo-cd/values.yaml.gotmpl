@@ -1,33 +1,7 @@
 {{- $config := (readFile "../../config.yaml") | fromYaml -}}
 
-global:
-  domain: {{ ternary $config.domain (printf "argocd.%s" $config.domain) $config.path_routing }}
-
-server:
-  ingress:
-    annotations:
-      {{ if not $config.path_routing -}}
-      cert-manager.io/cluster-issuer: letsencrypt-prod
-      {{ end -}}
-    path: {{ ternary "/argocd" "/" $config.path_routing }}
-
-configs:
-  cm:
-    oidc.config: |
-      name: Keycloak
-      issuer: https://{{ ternary (printf "%s/keycloak" $config.domain) (printf "keycloak.%s" $config.domain) $config.path_routing }}/realms/cnoe
-      clientID: argocd
-      enablePKCEAuthentication: true
-      requestedScopes:
-        - openid
-        - profile
-        - email
-        - groups
-  params:
-    'server.basehref': {{ ternary "/argocd" "/" $config.path_routing }}
-    'server.rootpath': {{ ternary "argocd" "" $config.path_routing }}
-
 extraObjects:
+
   - apiVersion: v1
     kind: Secret
     type: Opaque
@@ -46,11 +20,16 @@ extraObjects:
         clusterName: {{ $config.cluster_name }}
         clusterOIDCIssuerURL: {{ $config.cluster_oidc_issuer_url }}
         domain: {{ $config.domain }}
+        keyvault: {{$config.keyvault}}
         pathRouting: "{{ $config.path_routing }}"
         environment: "control-plane"
+        crossplaneClientId: "{{ $config.crossplane_workload_identity.clientId }}"
+        crossplaneTenantId: "{{ $config.crossplane_workload_identity.tenantId }}"
+        letsencryptEnv: "{{ $config.letsencrypt_env }}"
     stringData:
       name: {{ $config.cluster_name }}
       server: https://kubernetes.default.svc
+
   - apiVersion: v1
     kind: Secret
     type: Opaque
