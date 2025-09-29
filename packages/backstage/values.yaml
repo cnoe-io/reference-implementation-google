@@ -121,6 +121,11 @@ backstage:
       baseUrl: ${ARGO_WORKFLOWS_URL}
 postgresql:
   enabled: true
+  image:
+    repository: bitnamilegacy/postgresql
+  global:
+    security:
+      allowInsecureImages: true
   auth:
     username: "backstage"
     existingSecret: "backstage-env-vars"

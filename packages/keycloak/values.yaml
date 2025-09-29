@@ -1,10 +1,18 @@
+image:
+  repository: bitnamilegacy/keycloak
+keycloakConfigCli:
+  image:
+    repository: bitnamilegacy/keycloak-config-cli
+
 adminRealm: "cnoe"
 production: true
 usePasswordFiles: false
 proxyHeaders: "forwarded"
 
 global:
-  defaultStorageClass: gp3
+  security:
+    allowInsecureImages: true
+  defaultStorageClass: default
 
 auth:
   adminUser: cnoe-admin
@@ -19,10 +27,16 @@ ingress:
   servicePort: http
   annotations:
     argocd.argoproj.io/sync-wave: "20"
+    external-dns.alpha.kubernetes.io/ttl: "60"
   tls: false
 
 postgresql:
   enabled: true
+  image:
+    repository: bitnamilegacy/postgresql
+  global:
+    security:
+      allowInsecureImages: true
   auth:
     username: keycloak
     database: keycloak
