@@ -148,7 +148,7 @@ tasks:
     preconditions:
       - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
-      - az account set  --subscription "{{.SUBSCRIPTION_ID}}"
+      - az account set --subscription "{{.SUBSCRIPTION_ID}}"
       - az config set defaults.location="{{.LOCATION}}" defaults.group="{{.RESOURCE_GROUP}}" {{.AZ_CLI_OPTS}}
 
   azure:creds:

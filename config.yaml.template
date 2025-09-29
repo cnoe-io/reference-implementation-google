@@ -1,10 +1,10 @@
 ### Config for CNOE Azure Reference Implementation ###
 # Source: "https://github.com/livewyer-ops/reference-implementation-azure"
 
-# Details of your repository fork
+# Details of your repository hosting the reference azure implementation code
 repo:
-  url: "https://github.com/livewyer-ops/reference-implementation-azure" # This is the GITHUB URL of the fork in Github Org that you have created.
-  revision: "v2" # Branch or Tag which should be used for Argo CD Apps
+  url: "https://github.com/<REPLACE_ME_your_org>/reference-implementation-azure"
+  revision: "main" # Branch or Tag which should be used for Argo CD Apps
   basepath: "packages" # Directory in which configuration of addons is stored
 
 # The name of the AKS cluster you are installing the reference implementation on.
@@ -32,7 +32,7 @@ path_routing: false
 github:
   appId: "<REPLACE_ME_12345678>"
   installationId: "<REPLACE_ME_12345678>"
-  orgURL: https://github.com/<<REPLACE_ME_your_org>
+  orgURL: https://github.com/<REPLACE_ME_your_org>
   clientId: <REPLACE_ME_clientId>
   clientSecret: <REPLACE_ME_clientSecret>
   webhookUrl: <REPLACE_ME_webhookUrl>
@@ -42,15 +42,15 @@ github:
     ...
     -----END RSA PRIVATE KEY-----
 
+letsencrypt_env: prod
+
+# Tags for Azure resources
+tags:
+  githubRepo: "github.com/<REPLACE_ME_your_org>/reference-implementation-azure"
+  env: "dev"
+  project: "cnoe"
+
 crossplane_workload_identity:
   create: true
   clientId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
   tenantId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
-
-letsencrypt_env: prod
-
-# Tags for AWS resources
-tags:
-  githubRepo: "github.com/livewyer-ops/reference-implementation-azure"
-  env: "dev"
-  project: "cnoe"

@@ -2,358 +2,328 @@
 
 > **_NOTE:_** Applications deployed in this repository are not meant or configured for production.
 
-# Installation
+<!-- omit from toc -->
+# CNOE Azure Reference Implementation
 
-- Installation script must be used with a AKS cluster because we use Workload Identity to talk to Azure services.
-- Components are installed as ArgoCD Applications.
-- Files under the `/packages` directory are meant to be usable without any modifications. This means certain configuration options like domain name must be passed outside of this directory. e.g. use ArgoCD's Helm parameters.
+This repository provides a reference implementation for deploying Cloud Native Operations Enabler (CNOE) components on Azure Kubernetes Service (AKS) using GitOps principles.
 
-## Basic installation flow
+<!-- omit from toc -->
+## Table of Contents
 
-The installation process follows the following pattern.
+- [Architecture](#architecture)
+  - [Deployed Components](#deployed-components)
+- [Important Notes](#important-notes)
+- [Prerequisites](#prerequisites)
+  - [Required Azure Resources](#required-azure-resources)
+    - [Setup Guidance for Azure Resources](#setup-guidance-for-azure-resources)
+  - [GitHub Integration Setup](#github-integration-setup)
+    - [Create GitHub App for Backstage](#create-github-app-for-backstage)
+    - [Create GitHub Token](#create-github-token)
+- [Installation Flow](#installation-flow)
+- [Security Notes](#security-notes)
+- [Installation Steps](#installation-steps)
+  - [Installation Requirements](#installation-requirements)
+  - [1. Configure the Installation](#1-configure-the-installation)
+    - [DNS and TLS Configuration](#dns-and-tls-configuration)
+      - [Automatic (Recommended)](#automatic-recommended)
+      - [Manual](#manual)
+  - [2. Install Components](#2-install-components)
+  - [3. Monitor Installation](#3-monitor-installation)
+  - [4. Get Access URLs](#4-get-access-urls)
+  - [5. Access Backstage](#5-access-backstage)
+- [Usage](#usage)
+- [Update Component Configurations](#update-component-configurations)
+  - [Backstage Templates](#backstage-templates)
+- [Uninstall](#uninstall)
+- [Contributing](#contributing)
+- [Troubleshooting](#troubleshooting)
+- [Potential Enhancements](#potential-enhancements)
 
-1. Create a GitHub App for Backstage integration.
-2. Install ArgoCD and configure it to be able to monitor your GitHub Organization.
-3. Run Terraform. Terraform is responsible for:
-   - Managing Azure resources necessary for the Kubernetes operators to function. Mostly IAM Roles.
-   - Install components as ArgoCD applications. Pass IAM role information where necessary.
-   - Apply Kubernetes manifests such as secrets and ingress where information cannot easily be passed to ArgoCD.
-   - Run all the above in an order because installation order matters for many of these components. For example, Keycloak must be installed and ready before Backstage can be installed and configured.
+## Architecture
+
+- Installation is managed through **Taskfile** and **Helmfile**
+  - See [TASKFILE.md](./docs/TASKFILE.md) for information about the tasks defined in the `Taskfile.yml` file.
+- Components are deployed as **ArgoCD Applications**
+- Uses **Azure Workload Identity** for secure authentication to Azure services
+- Files under the `/packages` directory are meant to be usable without modifications
+- Configuration is externalised through the `config.yaml` file
+
+### Deployed Components
+
+| Component        | Version    | Purpose                        |
+| ---------------- | ---------- | ------------------------------ |
+| ArgoCD           | 8.0.14     | GitOps continuous deployment   |
+| Crossplane       | 2.0.2-up.4 | Infrastructure as Code         |
+| Ingress-nginx    | 4.7.0      | Ingress controller             |
+| ExternalDNS      | 1.16.1     | Automatic DNS management       |
+| External-secrets | 0.17.0     | Secret management              |
+| Cert-manager     | 1.17.2     | TLS certificate management     |
+| Keycloak         | 24.7.3     | Identity and access management |
+| Backstage        | 2.6.0      | Developer portal               |
+| Argo-workflows   | 0.45.18    | Workflow orchestration         |
+
+## Important Notes
+
+- **Azure Resource Management**: This repository does not manage Azure infrastructure. AKS cluster, DNS zone, Key Vault, and related resources must be provisioned separately using your organization's infrastructure management approach.
+- **Production Readiness**: The helper tasks in this repository are for creating Azure resources for demo purposes only. Any production deployments should follow enterprise infrastructure management practices.
+- **Configuration Management**: All configuration is centralised in `config.yaml`. The `private/` directory is only for temporary files during development.
+
+## Prerequisites
+
+### Required Azure Resources
+
+Before using this reference implementation, you **MUST** have the following Azure resources already created and configured:
+
+1. **AKS Cluster** (1.27+) with:
+   - OIDC Issuer enabled (`--enable-oidc-issuer`)
+   - Workload Identity enabled (`--enable-workload-identity`)
+   - Sufficient node capacity for all components
+     - For example, the demonstration AKS cluster created with the helper task `azure:creds:create` has node pool with the node size set to `standard_d4alds_v6` by default 
+2. **Azure DNS Zone**
+   - A registered domain with Azure DNS as the authoritative DNS service
+3. **Azure Key Vault**
+   - For storing configuration secrets and certificates
+   - Must be accessible from the AKS cluster
+4. **Crossplane Workload Identity**
+   - Azure Managed Identity with appropriate permissions
+   - Federated credentials configured for the AKS cluster OIDC issuer
+
+> **Important**: 
+> - All Azure resources must be in the same subscription and resource group
+> - These resources are prerequisites and must be provisioned using your organisation's preferred infrastructure management approach (Terraform, Bicep, ARM templates, etc.). The tasks in this repository that create Azure resources (`azure:creds:create`, `test:aks:create`, etc.) are helper functions for demonstration purposes only and are **NOT recommended for production deployments**.
+
+#### Setup Guidance for Azure Resources
+
+For setting up the prerequisite Azure resources, refer to the official Azure documentation:
+
+- [Create an AKS cluster](https://docs.microsoft.com/en-us/azure/aks/kubernetes-walkthrough)
+- [Azure DNS zones](https://docs.microsoft.com/en-us/azure/dns/)
+- [Azure Key Vault](https://docs.microsoft.com/en-us/azure/key-vault/)
+- [Azure Workload Identity](https://azure.github.io/azure-workload-identity/)
+
+### GitHub Integration Setup
+
+#### Create GitHub App for Backstage
+
+You need a GitHub App to enable Backstage integration with your GitHub organisation.
+
+**Option 1: Using Backstage CLI (Recommended)**
+
+```bash
+npx '@backstage/cli' create-github-app ${GITHUB_ORG_NAME}
+# Select appropriate permissions when prompted
+# Install the app to your organisation in the browser
+
+# Move the credentials file to a temporary location
+mkdir -p private
+GITHUB_APP_FILE=$(ls github-app-* | head -n1)
+mv ${GITHUB_APP_FILE} private/github-integration.yaml
+```
+
+**Option 2: Manual Creation**
+Follow [Backstage GitHub App documentation](https://backstage.io/docs/integrations/github/github-apps) and save the credentials as `private/github-integration.yaml`.
+
+> **Note**: The `private/` directory is for temporary files during development/testing only. All configuration must be properly stored in `config.yaml` for the actual deployment.
+
+#### Create GitHub Token
+
+Create a GitHub Personal Access Token with these permissions:
+
+- Repository access for all repositories
+- Read-only access to: Administration, Contents, and Metadata
+
+Save the token value temporarily as you will need it when creating the `config.yaml` file.
+
+## Installation Flow
+
+The installation process follows this pattern:
+
+1. Configure your environment settings in `config.yaml`
+   - The [Installation](#installation) process will include creating a `config.yaml` file using the [`config.yaml.template`](https://github.com/livewyer-ops/reference-implementation-azure/blob/v2/config.yaml.template) in this repository
+2. Run `task install` which:
+   - Sets up Azure Workload Identity credentials
+   - Deploys ArgoCD via Helmfile
+   - Creates ArgoCD ApplicationSets that deploy all other components
+   - Configures workload identities and RBAC automatically
 
 ```mermaid
 ---
 title: Installation Process
 ---
 erDiagram
-  "Local Machine" ||--o{ "ArgoCD" : "1. installs"
-  "Local Machine" ||--o{ "Terraform" : "2. invokes"
-  "Terraform" ||--o{ "Azure Resources" : "3. creates"
-  "Terraform" ||--o{ "ArgoCD" : "4. create ArgoCD Apps"
+  "Local Machine" ||--o{ "Taskfile" : "1. executes"
+  "Taskfile" ||--o{ "Azure CLI" : "2. configures identity"
+  "Taskfile" ||--o{ "Helmfile" : "3. deploys ArgoCD"
+  "Helmfile" ||--o{ "ArgoCD" : "4. installs"
   "ArgoCD" ||--o{ "This Repo" : "pulls manifests"
-  "ArgoCD" ||--o{ "Components" : "installs to the cluster"
+  "ArgoCD" ||--o{ "Components" : "installs via ApplicationSets"
 ```
 
-This installation pattern where some Kubernetes manifests are handled in Terraform while others are handled in GitOps manner may not be suitable for many organizations. If you can be certain about parameters such as domain name and certificate handling, it is better to utilize GitOps approach where these information are committed to a repository. The reason it is handled this way is to allow for customization for different organizations without forking this repository and committing organization specific information into the repository.
+## Security Notes
 
-## Secret handling
+- GitHub App credentials contain sensitive information - handle with care
+- Configuration secrets are stored in Azure Key Vault
+- Workload Identity is used for secure Azure authentication
+- TLS encryption is used for all external traffic
 
-Currently handled outside of repository and set via bash script. Secrets such as GitHub token and TLS private keys are stored in the `${REPO_ROOT}/private` directory.
+## Installation Steps
 
-We may be able to use sealed secrets with full GitOps approach in the future.
+### Installation Requirements
 
-## Requirements
+- **Azure CLI** (2.13+) with subscription access
+- **kubectl** (1.27+)
+- **kubelogin** for AKS authentication
+- **yq** for YAML processing
+- **jq** for JSON processing
+- **curl** and **git**
+- **helm** (3.x)
+- **helmfile**
+- **task** (Taskfile executor)
+- A **GitHub Organisation** (free to create)
 
-- Github **Organization** (free to create)
-- An existing AKS cluster version (1.27+)
-- Azure CLI (2.13+)
-- [kubelogin](https://github.com/Azure/kubelogin)
-- Kubectl CLI (1.27+)
-- jq
-- git
-- yq
-- curl
-- kustomize
-- node + npm (if you choose to create GitHub App via CLI)
+### 1. Configure the Installation
 
-## Create GitHub Apps for your GitHub Organization
-
-GitHub app is used to enable integration between Backstage and GitHub.
-This allows you for integration actions such as automatically importing Backstage configuration such as Organization information and templates.
-
-We strongly encourage you to create a **dedicated GitHub organization**. If you don't have an organization for this purpose, please follow [this link](https://docs.github.com/en/organizations/collaborating-with-groups-in-organizations/creating-a-new-organization-from-scratch) to create one.
-
-There are two ways to create GitHub integration with Backstage. You can use the Backstage CLI, or create it manually. See [this page](https://backstage.io/docs/integrations/github/github-apps) for more information on creating one manually. Once the app is created, place it under the private directory with the name `github-integration.yaml`.
-
-To create one with the CLI, follow the steps below. If you are using cli to create GitHub App, please make sure to select third option in the permissions prompt, if your GitHub App access needs publishing access to create GitHub repositories for your backstage templates.
+Copy and customise the configuration:
 
 ```bash
-npx '@backstage/cli' create-github-app ${GITHUB_ORG_NAME}
-# If prompted, select all for permissions or select permissions listed in this page https://backstage.io/docs/integrations/github/github-apps#app-permissions
-# In the browser window, allow access to all repositories then install the app.
-
-? Select permissions [required] (these can be changed later but then require approvals in all installations) (Press <space> to select, <a> to toggle all, <i> to invert selection,
-and <enter> to proceed)
- ◉ Read access to content (required by Software Catalog to ingest data from repositories)
- ◉ Read access to members (required by Software Catalog to ingest GitHub teams)
-❯◯ Read and Write to content and actions (required by Software Templates to create new repositories)
-
-# move it to a "private" location.
-mkdir -p private
-GITHUB_APP_FILE=$(ls github-app-* | head -n1)
-mv ${GITHUB_APP_FILE} private/github-integration.yaml
+cp config.yaml.template config.yaml
+# Edit config.yaml with your values
 ```
 
-**The file created above contains credentials. Handle it with care.**
+Key configuration sections in `config.yaml`:
 
-The rest of the installation process assumes the GitHub app credentials are available at `private/github-integration.yaml`
+- `repo`: The details of the repository hosting the reference azure implementation code
+- `cluster_name`: Your AKS cluster name
+- `subscription`: Your Azure subscription ID
+- `location`: The target Azure region
+- `resource_group`: Your Azure resource group
+- `cluster_oidc_issuer_url`: The AKS OIDC issuer URL
+- `domain`: The base domain name you will be using for exposing services
+- `keyvault`: Your Azure Key Vault name
+- `github`: GitHub App credentials (from the [Github Integration Setup](#github-integration-setup))
 
-If you want to delete the GitHUb application, follow [these steps](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app).
+#### DNS and TLS Configuration
 
-## Create a GitHub token
+##### Automatic (Recommended)
 
-A GitHub token is needed by ArgoCD to get information about repositories under your Organization.
+- Set your domain in `config.yaml`
+- ExternalDNS manages DNS records automatically
+- Cert-manager handles Let's Encrypt certificates
 
-The following permissions are needed:
+##### Manual
 
-- Repository access for all repositories
-- Read-only access to: Administration, Contents, and Metadata.
-  Get your GitHub personal access token from: https://github.com/settings/tokens?type=beta
+- Set DNS records to point to the ingress load balancer IP
+- Provide your own TLS certificates as Kubernetes secrets
 
-Once you have your token, save it under the private directory with the name `github-token`. For example:
+### 2. Install Components
+
+If installing the reference implementation on a machine for the first time run:
 
 ```bash
-# From the root of this repository.
-$ mkdir -p private
-$ vim private/github-token # paste your token
-# example output
-$ cat private/github-token
-github_pat_ABCDEDFEINDK....
+task init
 ```
 
-## Install
-
-Follow the following steps to get started.
-
-1. Create GitHub apps and GitHub token as described above.
-2. Create a new AKS cluster. We do not include AKS cluster in the installation module because AKS cluster requirements vary between organizations and the focus of this is integration of different projects. If you prefer, you can create a new basic cluster with the included commands:
-
-   ```bash
-   az group create --name $(yq '.resource_group' setups/config.yaml) --location $(yq '.region' setups/config.yaml)
-   ```
-
-   ```bash
-   az aks create \
-     --name $(yq '.cluster_name' config.yaml) \
-     --location $(yq '.location' config.yaml) \
-     --resource-group $(yq '.resource_group' config.yaml) \
-     --kubernetes-version ${AKS_VERSION:-1.33} \
-     --sku base \
-     --enable-oidc-issuer \
-     --enable-workload-identity \
-     --node-vm-size ${AKS_NODE_SIZE:-standard_d4alds_v6}
-   ```
-
-   ```bash
-   az aks disable-addons -a monitoring --name $(yq '.cluster_name' config.yaml) --resource-group $(yq '.resource_group' config.yaml) && \
-   az aks update \
-     --name $(yq '.cluster_name' config.yaml) \
-     --resource-group $(yq '.resource_group' config.yaml) \
-     --disable-azure-monitor-metrics && \
-   az aks update \
-     --name $(yq '.cluster_name' config.yaml) \
-     --resource-group $(yq '.resource_group' config.yaml) \
-     --aad-admin-group-object-ids $(az ad group show -g aks-admin | yq '.id')
-   ```
-
-   ```bash
-   kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io --force=true --interactive=false --now=true gatekeeper-validating-webhook-configuration
-   kubectl delete mutatingwebhookconfigurations.admissionregistration.k8s.io --force=true --interactive=false --now=true gatekeeper-mutating-webhook-configuration
-   kubectl delete ns --force=true --interactive=false --now=true gatekeeper-system
-   kubectl api-resources -o json | jq -rc '.resources[] | select(.group != null) | select(.group | match(".gatekeeper.sh")) | .kind + .group' | xargs -I{} kubectl delete crd --force=true --interactive=false --now=true {}
-   ```
-
-   ```bash
-   az aks delete \
-    --name $(yq '.cluster_name' config.yaml) \
-    --resource-group $(yq '.resource_group' config.yaml) \
-    --yes
-   ```
-
-   ```bash
-   az aks get-credentials --name $(yq '.cluster_name' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
-   ```
-
-   ```bash
-   az aks show --name $(yq '.cluster_name' config.yaml) --resource-group $(yq '.resource_group' config.yaml) --query "oidcIssuerProfile.issuerUrl" -o tsv
-   ```
-
-3. If you don't have a public registered Azure DNS zone, [register a Azure DNS domain](https://learn.microsoft.com/en-us/azure/dns/) (be sure to use Azure DNS Zone as the DNS service for the domain). We **strongly encourage creating a dedicated sub domain** for this. If you'd rather manage DNS yourself, you can set `enable_dns_management` in the config file.
-4. Get the host zone id and put it in the config file.
-
-   ```bash
-   az network dns zone list --query "[?name=='${YOUR_DOMAIN_NAME}'].id"
-   # in the setups/config file, update the zone id.
-   hosted_zone_id:: /subscriptions/${SUBSCRIPTION_UUID}/resourceGroups/${DOMAIN_RESOURCE_GROUP}/providers/Microsoft.Network/dnszones/${YOUR_DOMAIN_NAME}
-   ```
-
-5. Update the [`setups/config`](setups/config.yaml) file with your own values.
-6. Run `setups/install.sh` and follow the prompts. See the section below about monitoring installation progress.
-7. Once installation completes, navigate to `backstage.<DOMAIN_NAME>` and log in as `user1`. Password is available as a secret. You may need to wait for DNS propagation to complete to be able to login. May take ~10 minutes.
-
-   ```bash
-   kubectl get secrets -n keycloak keycloak-user-config -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
-   ```
-
-### Monitoring installation progress
-
-Components are installed as ArgoCD Applications. You can monitor installation progress by going to ArgoCD UI.
+If you haven't previously run `task init`, then you will be prompted to install several Helm plugins required by Helmfile when you run the next command:
 
 ```bash
-# Get the admin password
+# Install all components
+task install
+```
+
+> **Notes**: 
+> - `task install` will update the `config.yaml` file
+> - Post-installation, use `task sync` (the equivalent to running `helmfile sync`) to apply updates. See the [Task Usage Guidelines](docs/TASKFILE.md) for more information.
+
+### 3. Monitor Installation
+
+Once ArgoCD is running, monitor the installation progress of the other components by checking the Argo CD UI:
+
+```bash
+# Get ArgoCD admin password
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
-kubectl port-forward svc/argocd-server -n argocd 8081:80
+# Port forward to ArgoCD
+kubectl port-forward svc/argocd-server -n argocd 8080:80
 ```
 
-Go to [`http://localhost:8081`](http://localhost:8081) and login with the username `admin` and password obtained above. In the UI you can look at resources created, their logs, and events.
+Access the ArgoCD UI at http://localhost:8080 with username `admin`.
 
-### If you installed it without automatic DNS configuration.
+### 4. Get Access URLs
 
-If you set `enable_dns_management: false`, you are responsible for updating DNS records, thus external-dns is not installed. You have to set the following DNS records:
+Use the `task get:urls` command to fetch all the URLs. 
 
-- `backstage.<DOMAIN_NAME>`
-- `keycloak.<DOMAIN_NAME>`
-- `argo.<DOMAIN_NAME>`
-- `argocd.<DOMAIN_NAME>`
+The URL structure of the URLs will depend on the type of routing you set in the configuration. Examples of the set of URLs that can be outputted are below:
 
-Point these records to the value returned by the following command.
+**Domain-based routing** (default):
+
+- Backstage: `https://backstage.YOUR_DOMAIN`
+- ArgoCD: `https://argocd.YOUR_DOMAIN`
+- Keycloak: `https://keycloak.YOUR_DOMAIN`
+- Argo Workflows: `https://argo-workflows.YOUR_DOMAIN`
+
+**Path-based routing** (set `path_routing: true`):
+
+- Backstage: `https://YOUR_DOMAIN/`
+- ArgoCD: `https://YOUR_DOMAIN/argocd`
+- Keycloak: `https://YOUR_DOMAIN/keycloak`
+- Argo Workflows: `https://YOUR_DOMAIN/argo-workflows`
+
+### 5. Access Backstage
+
+Once the Keycloak and Backstage are installed, check you can login to the Backstage UI with a default user:
 
 ```bash
-kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+# Get user password
+kubectl -n keycloak get secret keycloak-config -o yaml | yq '.data.USER1_PASSWORD | @base64d'
 ```
 
-### If you installed it without Cert Manager.
+## Usage
 
-If you set `MANAGED_CERT=false`, you are responsible for managing TLS certs, thus cert-manager is not installed. You must [create TLS secrets accordingly](https://kubernetes.io/docs/concepts/services-networking/ingress/#tls).
+See [DEMO.md](docs/DEMO.md) for information on how to navigate the platform and for usage examples.
 
-Run the following command to find where to create secrets.
+## Update Component Configurations
 
-```bash
-output=$(kubectl get ingress --all-namespaces -o json | jq -r '.items[] | "\(.metadata.namespace) \(.spec.rules[].host) \(.spec.tls[].secretName)"')
-echo -e "Namespace \t Hostname \t TLS Secret Name"
-echo -e "$output"
-```
+If you want to try customising component configurations, you can do so by updating the `packages/addons/values.yaml` file and using `task sync` to apply the updates.
 
-Secret format should be something like:
+### Backstage Templates
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: backstage.<DOMAIN>
-  namespace: backstage
-data:
-  tls.crt: <base64 encoded cert>
-  tls.key: <base64 encoded key>
-type: kubernetes.io/tls
-```
-
-## What was created?
-
-The following components are installed if you chose the full installation option.
-
-| Name             | Version |
-| ---------------- | ------- |
-| argo-workflows   | v3.4.8  |
-| argocd           | v2.7.6  |
-| backstage        | v1.16.0 |
-| cert-manager     | v1.12.2 |
-| crossplane       | v1.12.2 |
-| external-dns     | v0.13.5 |
-| ingress-nginx    | v1.8.0  |
-| keycloak         | v22.0.0 |
-| external-secrets | v0.9.2  |
-
-### Things created outside of the cluster
-
-If full installation is done, you should have these DNS entries available. They all point to the Network Load Balancer.
-
-- `backstage.<DOMAIN_NAME>`
-- `argo.<DOMAIN_NAME>`
-- `keycloak.<DOMAIN_NAME>`
-
-You can confirm these by querying at a register.
-
-```bash
-dig A `backstage.<DOMAIN_NAME>` @1.1.1.1
-
-kubectl get svc -n ingress-nginx
-```
-
-A Azure Load Balancer is also created. This is managed by the Kubernetes Service and points to ingress-nginx pod. This pod is responsible for routing requests to correct places. As a result, HTTPS endpoints are created with valid certificates.
-
-```bash
-openssl s_client -showcerts -servername id.<DOMAIN_NAME> -connect id.<DOMAIN_NAME>:443 <<< "Q"
-curl https://backstage.<DOMAIN_NAME>
-```
-
-## How to access the Backstage instance?
-
-When you open a browser window and go to `https://backstage.<DOMAIN_NAME>`, you should be prompted to login.
-Two users are created during the installation process: `user1` and `user2`. Their passwords are available in the keycloak namespace.
-
-```bash
-kubectl get secrets -n keycloak keycloak-user-config -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
-```
+Backstage templates can be found in the `templates/` directory
 
 ## Uninstall
 
-1. Run `setups/uninstall.sh` and follow the prompts.
-2. Remove GitHub app from your Organization by following [these steps](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app).
-3. Remove token from your GitHub Organization by following [these steps](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/reviewing-and-revoking-personal-access-tokens-in-your-organization).
-4. Remove the created GitHub Organization.
+```bash
+# Remove all components
+task uninstall
 
-<details>
-    <summary>Uninstall details</summary>
+# Clean up GitHub App and tokens manually
+# Delete the GitHub organisation if no longer needed
+```
 
-### Resources deleted
+## Contributing
 
-Currently resources created by applications are not deleted. For example, if you have Spark Jobs running, they are not deleted and may block deletion of the spark-operator app.
+This reference implementation is designed to be:
 
-</details>
-
-## What can you do in Backstage?
-
-See [this doc](./demo.md) for demos!
-
-## Possible issues
-
-### Cert-manager
-
-- by default it uses http-01 challenge. If you'd prefer using dns-01, you can update the ingress files. TODO AUTOMATE THIS
-- You may get events like `Get "http://<DOMAIN>/.well-known/acme-challenge/09yldI6tVRvtWVPyMfwCwsYdOCEGGVWhmb1PWzXwhXI": dial tcp: lookup <DOMAIN> on 10.100.0.10:53: no such host`. This is due to DNS propagation delay. It may take ~10 minutes.
+- **Forkable**: Create your own version for your organisation
+- **Customizable**: Modify configurations without changing core packages
+- **Extensible**: Add new components following the established patterns
 
 ## Troubleshooting
 
-See [the troubleshooting doc](TROUBLESHOOTING.md) for more information.
+See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues and detailed troubleshooting steps.
 
-## Creation Order notes
+## Potential Enhancements
 
-<details>
-    <summary>Click to expand</summary>
+The installation of this Azure reference implemenation will give you a starting point for the platform, however as previously stated applications deployed in this repository are not meant or configured for production. To push it towards production ready, you can make further enhancements that could include:
 
-## Things created outside of the cluster with Keycloak SSO enabled.
-
-- Azure DNS Zone records. Azure DNS hosted zones are not created. You must also register it if you want to be able to access through public DNS. These are managed by the external DNS controller.
-
-- Azure Load Balancer. This is just the entrance to the Kubernetes cluster. This points to the default installation of Ingress Nginx.
-
-- TLS Certificates issued by Let's Encrypt. These are managed by cert-manager based on values in Ingress. They use the production issuer which means we must be very careful with how many and often we request certificates from them. The uninstall scripts backup certificates to the `private` directory to avoid re-issuing certificates.
-
-These resources are controlled by Kubernetes controllers and thus should be deleted using controllers.
-
-### Keycloak SSO with DNS and TLS certificates
-
-If using keycloak SSO with fully automated DNS and certificate management, it must be:
-
-1. ingress-nginx
-2. cert-manager
-3. external-dns
-4. keycloak
-5. The rest of stuff
-
-### Keycloak SSO with manual DNS and TLS Certificates
-
-If using keycloak SSO but manage DNS records and certificates manually.
-
-1. ingress-nginx
-2. The rest of stuff minus cert-manager and external-dns
-
-In this case, you can issue your own certs and provide them as TLS secrets as specified in the `spec.tls[0].secretName` field of Ingress objects.
-You can also let Load Balancer terminate TLS instead using the LB controller. This is not covered currently, but possible.
-
-### No SSO
-
-If no SSO, no particular installation order. Eventual consistency works.
-
-</details>
+1. Modifying the basic and Argo workflow templates for your specific Azure use cases
+2. Intergrating additional Azure services with Crossplane
+3. Configuring auto-scaling for AKS and Azure resources
+4. Adding OPA Gatekeeper for governance
+5. Intergrating a monitoring stack. For example:
+   1. Deploy Prometheus and Grafana
+   2. Configure service monitors for Azure resources
+   3. View metrics and Azure resource status in Backstage
+6. Implementing GitOps-based environment promotion:
+   1. **Development**: Deploy to dev environment via Git push
+   2. **Testing**: Promote to test environment via ArgoCD
+   3. **Production**: Use ArgoCD sync waves for controlled rollout
