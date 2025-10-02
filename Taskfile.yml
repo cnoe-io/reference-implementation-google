@@ -28,6 +28,8 @@ tasks:
   init:
     deps:
       - update:kubeconfig
+    preconditions:
+      - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
       - task: helmfile:init
       - task: helmfile:lint
@@ -36,6 +38,8 @@ tasks:
   install:
     deps:
       - update:kubeconfig
+    preconditions:
+      - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
       - task: azure:creds
       - task: helmfile
@@ -44,12 +48,16 @@ tasks:
   diff:
     deps:
       - update:kubeconfig
+    preconditions:
+      - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
       - task: helmfile:diff
 
   sync:
     deps:
       - update:kubeconfig
+    preconditions:
+      - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
       - task: helmfile:sync
       - task: update
@@ -65,6 +73,8 @@ tasks:
     deps:
       - task: update:kubeconfig
         silent: true
+    preconditions:
+      - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
       - task: update:secret
 
@@ -72,6 +82,8 @@ tasks:
     deps:
       - task: update:kubeconfig
         silent: true
+    preconditions:
+      - yq 'true' "{{.CONFIG_FILE}}"
     cmds:
       - task: update:secret:azure
       - task: wait
@@ -217,7 +229,7 @@ tasks:
           --audience "api://AzureADTokenExchange"
       - task: wait
         vars:
-          IF: $(az identity federated-credential list {{.AZ_CLI_OPTS}} --identity-name "{{.IDENTITY_NAME}}" 2>/dev/null && echo 0 || echo 1) -ne 0 || $(az identity show {{.AZ_CLI_OPTS}} --name "{{.IDENTITY_NAME}}" -o yaml 2>/dev/null | yq '[.principalId] | length') -ne 1
+          IF: $(az identity federated-credential list {{.AZ_CLI_OPTS}} --identity-name "{{.IDENTITY_NAME}}" 2>/dev/null && echo 0 || echo 1) -ne 0 && $(az identity show {{.AZ_CLI_OPTS}} --name "{{.IDENTITY_NAME}}" -o yaml 2>/dev/null | yq '[.principalId] | length') -ne 1
       - |-
         az role assignment create {{.AZ_CLI_OPTS}} \
           --assignee-object-id "$(az identity show {{.AZ_CLI_OPTS}} --name "{{.IDENTITY_NAME}}" --query 'principalId' -o tsv)" \
@@ -273,29 +285,37 @@ tasks:
   uninstall:
     deps:
       - update:kubeconfig
+    ignore_error: true
     cmds:
       - defer: { task: cleanup }
+      - kubectl delete appset $(yq '. | keys - ["argocd","crossplane","external-dns"] | .[]' packages/addons/values.yaml packages/bootstrap/values.yaml) -n argocd --interactive=false --now
       - kubectl delete ingress -A --all --interactive=false --now
+      - task: wait
+        vars:
+          IF: true
+          TIMEOUT: 120
       - kubectl delete workloadidentities.azure.livewyer.io -A --all --interactive=false --now
       - task: wait
         vars:
           IF: true
           TIMEOUT: 30
       - kubectl delete pkg --all --interactive=false --now
-      - task: azure:creds:delete
-      - kubectl delete appset -A --all --interactive=false --now
-      - kubectl delete app -A --all --interactive=false --now --cascade=orphan
       - task: wait
         vars:
           IF: true
-          TIMEOUT: 30
+          TIMEOUT: 60
+      - task: azure:creds:delete
+      - kubectl delete appset $(kubectl get appset -n argocd -o yaml | yq '.items[] | select(.metadata.name != "argocd").metadata.name') -n argocd --interactive=false --now
+      - task: wait
+        vars:
+          IF: $(kubectl get appset -A -o yaml | yq '[.items[] | select(.metadata.name != "argocd")] | length') -ne 0
+          TIMEOUT: 600
       - task: helmfile:destroy
-      - cmd: kubectl delete ns "{{.ITEM}}" --interactive=false --now --cascade=orphan
-        for: { var: NS }
-    vars:
-      NS:
-        sh: yq 'to_entries[] | select(.value.enabled==true).value.namespace' packages/addons/values.yaml
-    ignore_error: true
+      - task: wait
+        vars:
+          IF: true
+          TIMEOUT: 60
+      - kubectl delete ns $(yq 'to_entries[] | select(.value.enabled==true).value.namespace' packages/addons/values.yaml packages/bootstrap/values.yaml | sort | uniq) --interactive=false --now --cascade=orphan
 
   test:aks:create:
     deps:
