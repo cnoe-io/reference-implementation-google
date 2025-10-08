@@ -11,6 +11,7 @@ extraObjects:
         argocd.argoproj.io/secret-type: cluster
         environment: "control-plane"
       annotations:
+        cnoe.io/cluster: bootstrap
         addonsRepoURL: {{ $config.repo.url }}
         addonsRepoRevision: {{ $config.repo.revision }}
         addonsRepoBasepath: {{ $config.repo.basepath }}

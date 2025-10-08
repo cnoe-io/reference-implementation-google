@@ -6,6 +6,8 @@ helmDefaults:
 repositories:
   - name: argo
     url: https://argoproj.github.io/argo-helm
+  - name: crossplane
+    url: https://charts.upbound.io/stable
 
 releases:
   - name: argocd
@@ -13,21 +15,14 @@ releases:
     chart: argo/argo-cd
     version: '{{ ((readFile (printf "%s/%s" (requiredEnv "REPO_ROOT") "packages/addons/values.yaml")) | fromYaml).argocd.defaultVersion }}'
     values:
-      - packages/argo-cd/values.yaml
-      - packages/argo-cd/values.yaml.gotmpl
-  - name: cnoe-argocd-config
-    namespace: argocd
-    chart: packages/charts/raw
-    values:
       - packages/bootstrap/argocd.yaml.gotmpl
-    disableValidationOnInstall: true
-    needs:
-      - argocd/argocd
-  - name: cnoe-appset
+    suppressDiff: true
+  - name: bootstrap
     namespace: argocd
     chart: packages/appset-chart
     values:
-      - packages/addons/values.yaml
+      - packages/bootstrap/bootstrap-addons.yaml
     disableValidationOnInstall: true
+    suppressDiff: true
     needs:
-      - argocd/cnoe-argocd-config
+      - argocd/argocd

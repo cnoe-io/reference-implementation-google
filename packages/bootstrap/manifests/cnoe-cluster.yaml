@@ -1,0 +1,128 @@
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: cnoe-kubeconfig
+  namespace: argocd
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: crossplane-system
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          namespace: crossplane-system
+          key: ca.crt
+      auth:
+        serviceAccount:
+          name: crossplane
+          namespace: crossplane-system
+
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: cnoe-kubeconfig
+  namespace: argocd
+spec:
+  secretStoreRef:
+    name: cnoe-kubeconfig
+    kind: ClusterSecretStore
+  target:
+    name: cnoe
+    template:
+      engineVersion: v2
+      type: Opaque
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: cluster
+          cnoe.io/cluster: cnoe
+          environment: "control-plane"
+        annotations:
+          cnoe.io/cluster: cnoe
+          environment: "control-plane"
+          addonsRepoURL: "{{ (fromJson .config).repo.url }}"
+          addonsRepoRevision: "{{ (fromJson .config).repo.revision }}"
+          addonsRepoBasepath: "{{ (fromJson .config).repo.basepath }}"
+          subscription: "{{ (fromJson .config).subscription }}"
+          location: "{{ (fromJson .config).location }}"
+          resourceGroup: "{{ (fromJson .config).resource_group }}"
+          tenantId: "{{ (fromJson .config).tenant_id }}"
+          clusterName: "{{ (fromJson .config).cluster_name }}"
+          clusterOIDCIssuerURL: "{{ (fromJson .config).cluster_oidc_issuer_url }}"
+          domain: "{{ (fromJson .config).domain }}"
+          keyvault: "{{(fromJson .config).keyvault}}"
+          letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
+          pathRouting: "{{ (fromJson .config).path_routing }}"
+          crossplaneClientId: "{{ (fromJson .config).crossplane_workload_identity.clientId }}"
+          crossplaneTenantId: "{{ (fromJson .config).crossplane_workload_identity.tenantId }}"
+          githubOrgUrl: "{{ (fromJson .config).github.orgURL }}"
+          githubAppID: "{{ (fromJson .config).github.appId }}"
+          githubAppInstallationID: "{{ (fromJson .config).github.installationId }}"
+          githubClientID: "{{ (fromJson .config).github.clientId }}"
+          githubClientSecret: "{{ (fromJson .config).github.clientSecret }}"
+          githubWebhookURL: '{{ default "" (fromJson .config).github.webhookUrl }}'
+          githubWebhookSecret: '{{ default "" (fromJson .config).github.webhookSecret }}'
+          githubAppPrivateKey: |
+            {{ (fromJson .config).github.privateKey }}
+      data:
+        name: cnoe
+        server: "{{ .serverUrl }}"
+        config: |
+          {{ toJson (dict
+            "kubeconfig" (.kubeconfig | fromYaml)
+            "tlsClientConfig" (dict
+              "insecure" false
+              "caData" (b64enc .caData)
+              "certData" (b64enc .certData)
+              "keyData" (b64enc .keyData)
+              "serverName" (regexReplaceAll ":[0-9]+$" (urlParse .serverUrl).host "")
+            )
+          ) }}
+  data:
+    - secretKey: serverUrl
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "attribute.kube_config.0.host"
+    - secretKey: caData
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "kubeconfig.clustercacertificate"
+    - secretKey: certData
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "kubeconfig.clientcertificate"
+    - secretKey: keyData
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "kubeconfig.clientkey"
+    - secretKey: kubeconfig
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: kubeconfig
+    - secretKey: config
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-config
+        property: "config.json"

@@ -1,6 +1,7 @@
 # Used for bootstraping hub cluster with Addon Appset chart
 addons-appset: # for non-path routing
   enabled: true
+  project: cnoe
   chartName: addons
   namespace: argocd
   releaseName: addons
@@ -17,6 +18,7 @@ addons-appset: # for non-path routing
 
 addons-appset-pr: # for path routing
   enabled: true
+  project: cnoe
   chartName: addons
   namespace: argocd
   releaseName: addons
