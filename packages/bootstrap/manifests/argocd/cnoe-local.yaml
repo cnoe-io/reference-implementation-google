@@ -1,0 +1,109 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: cnoe-local
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    name: cnoe-kubeconfig
+    kind: ClusterSecretStore
+  target:
+    name: cnoe-bootstrap
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      type: Opaque
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: cluster
+          cnoe.io/cluster: bootstrap
+          environment: "control-plane"
+        annotations:
+          cnoe.io/cluster: bootstrap
+          environment: "control-plane"
+          addonsRepoURL: "{{ (fromJson .config).repo.url }}"
+          addonsRepoRevision: "{{ (fromJson .config).repo.revision }}"
+          addonsRepoBasepath: "{{ (fromJson .config).repo.basepath }}"
+          subscription: "{{ (fromJson .config).subscription }}"
+          location: "{{ (fromJson .config).location }}"
+          resourceGroup: "{{ (fromJson .config).resource_group }}"
+          tenantId: "{{ (fromJson .config).tenant_id }}"
+          clusterName: "{{ (fromJson .config).cluster_name }}"
+          clusterOIDCIssuerURL: "{{ (fromJson .config).cluster_oidc_issuer_url }}"
+          domain: "{{ (fromJson .config).domain }}"
+          keyvault: "{{(fromJson .config).keyvault}}"
+          letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
+          pathRouting: "{{ (fromJson .config).path_routing }}"
+          cnoeClusterUrl: "{{ .serverUrl }}"
+          crossplaneClientId: "{{ (fromJson .crossplane_sa).clientId }}"
+          crossplaneTenantId: "{{ (fromJson .crossplane_sa).tenantId }}"
+      data:
+        name: "{{ (fromJson .config).cluster_name }}-bootstrap"
+        server: https://kubernetes.default.svc
+  data:
+    - secretKey: config
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-config
+        property: "config.json"
+    - secretKey: serverUrl
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "attribute.kube_config.0.host"
+    - secretKey: crossplane_sa
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: crossplane-sa
+        property: credentials
+
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: cnoe-secret
+spec:
+  secretStoreRef:
+    name: cnoe-kubeconfig
+    kind: ClusterSecretStore
+  target:
+    name: cnoe-cluster-secret
+    template:
+      engineVersion: v2
+      type: Opaque
+      data:
+        ca.crt: "{{ .caData }}"
+        tls.crt: "{{ .certData }}"
+        tls.key: "{{ .keyData }}"
+  data:
+    - secretKey: caData
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "kubeconfig.clustercacertificate"
+    - secretKey: certData
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "kubeconfig.clientcertificate"
+    - secretKey: keyData
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: "kubeconfig.clientkey"

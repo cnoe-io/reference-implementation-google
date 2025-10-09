@@ -1,0 +1,19 @@
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: keyvault-config
+  namespace: crossplane-system
+spec:
+  refreshInterval: 5m
+  secretStoreRefs:
+    - name: azure-keyvault
+      kind: ClusterSecretStore
+  selector:
+    secret:
+      name: cnoe-config
+  data:
+    - conversionStrategy: None
+      match:
+        secretKey: config.json
+        remoteRef:
+          remoteKey: config

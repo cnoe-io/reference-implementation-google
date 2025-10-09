@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crossplane-sa
+  namespace: crossplane-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+spec:
+  template:
+    spec:
+      serviceAccountName: upbound-controller-manager
+      restartPolicy: Never
+      containers:
+        - name: crossplane-sa
+          image: docker.io/bitnamilegacy/kubectl
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              #! /bin/bash
+              set -e -o pipefail
+
+              kubectl -n crossplane-system wait --for=condition=Ready=true --for=condition=Synced=true --timeout=600s userassignedidentities.managedidentity.azure.m.upbound.io crossplane
+              if [ $? -eq 0 ]; then
+                jq -n \
+                  --arg clientId "$(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.clientId')" \
+                  --arg tenantId "$(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.tenantId')" \
+                  '{clientId: $clientId, tenantId: $tenantId}' > /tmp/credentials.json
+                kubectl -n crossplane-system create secret generic crossplane-sa --from-file=credentials=/tmp/credentials.json
+              else
+                echo "Error"
+                exit 1
+              fi

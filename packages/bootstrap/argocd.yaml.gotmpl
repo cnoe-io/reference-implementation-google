@@ -1,1 +1,95 @@
-{{ include "readManifest" (dict "PATH" "packages/argo-cd/manifests") }}
+{{- $config := (readFile "../../config.yaml") | fromYaml -}}
+{{- $credentials :=  (readFile "../../private/azure-credentials.json") | fromJson -}}
+
+dex:
+  enabled: false
+
+configs:
+  params:
+    server.insecure: true
+
+server:
+  ingress:
+    enabled: true
+    hostname: argocd.local.{{ $config.domain }}
+
+extraObjects:
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: cnoe-bootstrap
+      labels:
+        argocd.argoproj.io/secret-type: cluster
+        cnoe.io/cluster: bootstrap
+        environment: "control-plane"
+      annotations:
+        addonsRepoURL: {{ $config.repo.url }}
+        addonsRepoRevision: {{ $config.repo.revision }}
+        addonsRepoBasepath: {{ $config.repo.basepath }}
+        subscription: {{ $config.subscription }}
+        location: {{ $config.location }}
+        resourceGroup: {{ $config.resource_group }}
+        tenantId: {{ $config.tenant_id }}
+        clusterName: {{ $config.cluster_name }}
+        clusterOIDCIssuerURL: {{ $config.cluster_oidc_issuer_url }}
+        domain: {{ $config.domain }}
+        keyvault: {{$config.keyvault}}
+        pathRouting: "{{ $config.path_routing }}"
+        environment: "control-plane"
+        letsencryptEnv: "{{ $config.letsencrypt_env }}"
+    stringData:
+      name: "{{ $config.cluster_name }}-bootstrap"
+      server: https://kubernetes.default.svc
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: github-app-org
+      labels:
+        argocd.argoproj.io/secret-type: repo-creds
+    stringData:
+      type: git
+      url: {{ $config.github.orgURL }}
+      githubAppID: "{{ $config.github.appId }}"
+      githubAppInstallationID: "{{ $config.github.installationId }}"
+      githubClientID: {{ $config.github.clientId }}
+      githubClientSecret: "{{ $config.github.clientSecret }}"
+      {{ if $config.github.webhookUrl -}}
+      githubWebhookURL: {{ $config.github.webhookUrl }}
+      {{ end -}}
+      {{ if $config.github.webhookSecret }}
+      githubWebhookSecret: {{ $config.github.webhookSecret }}
+      {{ end -}}
+      githubAppPrivateKey: |
+        {{ $config.github.privateKey | nindent 8 }}
+
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: crossplane-system
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: cnoe-config
+      namespace: crossplane-system
+    stringData:
+      config.json: |
+        {{ $config | toJson }}
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: provider-azure
+      namespace: crossplane-system
+    stringData:
+      credentials: |
+        {{ $credentials | toJson }}
+      clientId: {{ $credentials.clientId }}
+      clientSecret: {{ $credentials.clientSecret }}
+      tenantId: {{ $credentials.tenantId }}

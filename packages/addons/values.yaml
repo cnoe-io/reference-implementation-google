@@ -11,7 +11,7 @@ argocd:
     server:
       ingress:
         annotations:
-          cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
+          cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-{{ .metadata.annotations.letsencryptEnv }}{{ end }}'
         path: '/{{ if eq .metadata.annotations.pathRouting "true" }}argocd{{ end }}'
     configs:
       cm:
@@ -44,62 +44,35 @@ crossplane:
   releaseName: crossplane
   defaultVersion: "2.0.2-up.4"
   chartRepository: "https://charts.upbound.io/stable"
-  selector:
-    matchExpressions:
-      - key: environment
-        operator: In
-        values: ["control-plane"]
-
-crossplane-config:
-  enabled: true
-  chartName: raw
-  namespace: crossplane-system
-  releaseName: crossplane-xrs
-  defaultVersion: "0.1.0"
-  chartRepository: "{{ .metadata.annotations.addonsRepoURL }}"
-  path: packages/charts/raw
   valuesObject:
-    templates:
+    customLabels:
+      azure.workload.identity/use: "true"
+    serviceAccount:
+      customAnnotations:
+        azure.workload.identity/client-id: "{{ .metadata.annotations.crossplaneClientId }}"
+        azure.workload.identity/tenant-id: "{{ .metadata.annotations.crossplaneTenantId }}"
+    extraObjects:
       - apiVersion: azure.m.upbound.io/v1beta1
         kind: ClusterProviderConfig
         metadata:
           name: default
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
           credentials:
-            source: Secret
-            secretRef:
-              name: provider-azure
-              namespace: crossplane-system
-              key: credentials
-      - apiVersion: kubernetes.m.crossplane.io/v1alpha1
-        kind: ClusterProviderConfig
-        metadata:
-          name: default
-          namespace: crossplane-system
-        spec:
-          credentials:
-            source: InjectedIdentity
-  selector:
-    matchExpressions:
-      - key: environment
-        operator: In
-        values: ["control-plane"]
-
-crossplane-xrs:
-  enabled: true
-  chartName: raw
-  namespace: crossplane-system
-  releaseName: crossplane-xrs
-  defaultVersion: "0.1.0"
-  chartRepository: "{{ .metadata.annotations.addonsRepoURL }}"
-  path: packages/charts/raw
-  valuesObject:
-    templates:
+            source: OIDCTokenFile
+            # source: UserAssignedManagedIdentity
+          oidcTokenFilePath: /var/run/secrets/azure/tokens/azure-identity-token
+          subscriptionID: "{{ .metadata.annotations.subscription }}"
+          clientID: "{{ .metadata.annotations.crossplaneClientId }}"
+          tenantID: "{{ .metadata.annotations.crossplaneTenantId }}"
       - apiVersion: azure.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
           name: external-dns
           namespace: external-dns
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
           forProvider:
             location: "{{ .metadata.annotations.location }}"
@@ -107,40 +80,43 @@ crossplane-xrs:
             resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
             roleAssignments:
               - roleDefinitionName: DNS Zone Contributor
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
-              - roleDefinitionName: Reader
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.Network/dnszones/{{ .metadata.annotations.domain }}"
             serviceAccountName: external-dns
       - apiVersion: azure.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
           name: external-secrets
           namespace: external-secrets
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
           forProvider:
             location: "{{ .metadata.annotations.location }}"
             oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
             resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
             roleAssignments:
-              - roleDefinitionName: Key Vault Secrets User
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
-            serviceAccountName: external-secrets
+              - roleDefinitionName: Key Vault Administrator
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.KeyVault/vaults/{{ .metadata.annotations.keyvault }}"
+            serviceAccountName: workload-identity-sa
       - apiVersion: azure.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
-          name: keycloak-eso-store
+          name: keycloak
           namespace: keycloak
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
           forProvider:
             location: "{{ .metadata.annotations.location }}"
             oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
             resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
             roleAssignments:
-              - roleDefinitionName: Key Vault Secrets User
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
-              - roleDefinitionName: Key Vault Reader
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourcegroups/{{ .metadata.annotations.resourceGroup }}"
+              - roleDefinitionName: Key Vault Administrator
+                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.KeyVault/vaults/{{ .metadata.annotations.keyvault }}"
             serviceAccountName: eso-store
+  additionalResources:
+    - manifestPath: "manifests"
+      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
@@ -154,6 +130,15 @@ ingress-nginx:
   releaseName: ingress-nginx
   defaultVersion: "4.7.0"
   chartRepository: "https://kubernetes.github.io/ingress-nginx"
+  valuesObject:
+    controller:
+      service:
+        type: LoadBalancer
+        externalTrafficPolicy: Local
+        annotations:
+          service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /healthz
+        targetPorts:
+          https: "https"
   selector:
     matchExpressions:
       - key: environment
@@ -172,9 +157,6 @@ external-dns:
       name: azure
     domainFilters:
       - "{{ .metadata.annotations.domain }}"
-  additionalResources:
-    - manifestPath: "manifests"
-      type: "manifests"
   selector:
     matchExpressions:
       - key: environment
@@ -183,14 +165,44 @@ external-dns:
 
 external-secrets:
   enabled: true
-  enableAckPodIdentity: false
   namespace: external-secrets
   chartName: external-secrets
   defaultVersion: "0.17.0"
   chartRepository: "https://charts.external-secrets.io"
-  additionalResources:
-    - manifestPath: "manifests"
-      type: "manifests"
+  valuesObject:
+    extraObjects:
+      - apiVersion: external-secrets.io/v1
+        kind: ClusterSecretStore
+        metadata:
+          name: azure-keyvault
+        spec:
+          provider:
+            azurekv:
+              authType: WorkloadIdentity
+              vaultUrl: "https://{{ .metadata.annotations.keyvault }}.vault.azure.net"
+              serviceAccountRef:
+                name: workload-identity-sa
+                namespace: external-secrets
+      - apiVersion: external-secrets.io/v1
+        kind: ClusterSecretStore
+        metadata:
+          name: keycloak
+          annotations:
+            argocd.argoproj.io/sync-wave: "60"
+        spec:
+          provider:
+            kubernetes:
+              remoteNamespace: keycloak
+              server:
+                caProvider:
+                  type: ConfigMap
+                  name: kube-root-ca.crt
+                  namespace: keycloak
+                  key: ca.crt
+              auth:
+                serviceAccount:
+                  name: eso-store
+                  namespace: keycloak
   selector:
     matchExpressions:
       - key: environment
@@ -226,7 +238,7 @@ keycloak:
     ingress:
       hostname: '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
       annotations:
-        cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
+        cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-{{ .metadata.annotations.letsencryptEnv }}{{ end }}'
       extraTls:
         - hosts:
             - '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
@@ -251,7 +263,7 @@ backstage:
     ingress:
       host: '{{ if eq .metadata.annotations.pathRouting "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
       annotations:
-        cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
+        cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-{{ .metadata.annotations.letsencryptEnv }}{{ end }}'
     backstage:
       appConfig:
         catalog:
@@ -291,7 +303,7 @@ argo-workflows:
         redirectUrl: '{{ if eq .metadata.annotations.pathRouting "true" }}https://{{ .metadata.annotations.domain }}/argo-workflows{{ else }}https://argo-workflows.{{ .metadata.annotations.domain }}{{ end }}/oauth2/callback'
       ingress:
         annotations:
-          cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-prod{{ end }}'
+          cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-{{ .metadata.annotations.letsencryptEnv }}{{ end }}'
           nginx.ingress.kubernetes.io/rewrite-target: '{{ if eq .metadata.annotations.pathRouting "true" }}/$2{{ end }}'
         hosts:
           - '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argo-workflows.{{ .metadata.annotations.domain }}{{ end }}'

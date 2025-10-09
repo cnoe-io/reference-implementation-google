@@ -27,7 +27,8 @@ spec:
         githubClientSecret: "{{ .githubClientSecret }}"
         githubWebhookURL: "{{ .githubWebhookURL }}"
         githubWebhookSecret: "{{ .githubWebhookSecret }}"
-        githubAppPrivateKey: "{{ .githubAppPrivateKey }}"
+        githubAppPrivateKey: |
+          {{ .githubAppPrivateKey }}
   data:
     - secretKey: url
       remoteRef:

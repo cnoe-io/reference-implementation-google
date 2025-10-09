@@ -29,6 +29,7 @@ metadata:
   name: cnoe-kubeconfig
   namespace: argocd
 spec:
+  refreshInterval: 1m
   secretStoreRef:
     name: cnoe-kubeconfig
     kind: ClusterSecretStore
@@ -58,8 +59,8 @@ spec:
           keyvault: "{{(fromJson .config).keyvault}}"
           letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
           pathRouting: "{{ (fromJson .config).path_routing }}"
-          crossplaneClientId: "{{ (fromJson .config).crossplane_workload_identity.clientId }}"
-          crossplaneTenantId: "{{ (fromJson .config).crossplane_workload_identity.tenantId }}"
+          crossplaneClientId: "{{ (fromJson .crossplane_sa).clientId }}"
+          crossplaneTenantId: "{{ (fromJson .crossplane_sa).tenantId }}"
           githubOrgUrl: "{{ (fromJson .config).github.orgURL }}"
           githubAppID: "{{ (fromJson .config).github.appId }}"
           githubAppInstallationID: "{{ (fromJson .config).github.installationId }}"
@@ -126,3 +127,10 @@ spec:
         metadataPolicy: None
         key: cnoe-config
         property: "config.json"
+    - secretKey: crossplane_sa
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: crossplane-sa
+        property: credentials

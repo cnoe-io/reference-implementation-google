@@ -1,0 +1,24 @@
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: default
+spec:
+  credentials:
+    source: InjectedIdentity
+
+---
+apiVersion: azure.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: default
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      key: credentials
+      name: provider-azure
+      namespace: crossplane-system

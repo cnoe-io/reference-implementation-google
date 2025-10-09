@@ -21,6 +21,13 @@ argocd-local:
   chartRepository: "https://argoproj.github.io/argo-helm"
   selectorMatchLabels:
     cnoe.io/cluster: bootstrap
+  ignoreDifferences:
+    - group: v1
+      kind: "*"
+      jsonPointers:
+        - /metadata/annotations/meta.helm.sh~1release-namespace
+        - /metadata/annotations/meta.helm.sh~1release-name
+        - /metadata/labelsapp.kubernetes.io~1managed-by
   valuesObject:
     global:
       domain: "argocd.local.{{ .metadata.annotations.domain }}"
@@ -28,7 +35,7 @@ argocd-local:
       params:
         server.insecure: true
   additionalResources:
-    - manifestPath: ../bootstrap/manifests
+    - manifestPath: ../bootstrap/manifests/argocd
       type: manifests
 
 argocd:
@@ -74,6 +81,8 @@ argocd:
             argocd.argoproj.io/secret-type: cluster
             environment: "control-plane"
           annotations:
+            cnoeCluster: cnoe
+            environment: "control-plane"
             addonsRepoURL: "{{ .metadata.annotations.addonsRepoURL }}"
             addonsRepoRevision: "{{ .metadata.annotations.addonsRepoRevision }}"
             addonsRepoBasepath: "{{ .metadata.annotations.addonsRepoBasepath }}"
@@ -86,11 +95,9 @@ argocd:
             domain: "{{ .metadata.annotations.domain }}"
             keyvault: "{{.metadata.annotations.keyvault}}"
             pathRouting: "{{ .metadata.annotations.pathRouting }}"
-            environment: "control-plane"
+            letsencryptEnv: "{{ .metadata.annotations.letsencryptEnv }}"
             crossplaneClientId: "{{ .metadata.annotations.crossplaneClientId }}"
             crossplaneTenantId: "{{ .metadata.annotations.crossplaneTenantId }}"
-            letsencryptEnv: "{{ .metadata.annotations.letsencryptEnv }}"
-            cnoeCluster: cnoe
         stringData:
           name: "{{ .metadata.annotations.clusterName }}"
           server: https://kubernetes.default.svc
@@ -174,7 +181,7 @@ external-secrets:
         spec:
           provider:
             azurekv:
-              vaultUrl: https://cnoe-ref-impl.vault.azure.net
+              vaultUrl: "https://{{ .metadata.annotations.keyvault }}.vault.azure.net"
               authType: ServicePrincipal
               tenantId: "{{ .metadata.annotations.tenantId }}"
               authSecretRef:
@@ -186,26 +193,9 @@ external-secrets:
                   key: clientSecret
                   name: provider-azure
                   namespace: crossplane-system
-
-      - apiVersion: external-secrets.io/v1alpha1
-        kind: PushSecret
-        metadata:
-          name: "{{ .metadata.annotations.keyvault }}-config"
-          namespace: crossplane-system
-        spec:
-          refreshInterval: 30m
-          secretStoreRefs:
-            - name: azure-keyvault
-              kind: ClusterSecretStore
-          selector:
-            secret:
-              name: cnoe-config
-          data:
-            - conversionStrategy: None
-              match:
-                secretKey: config.json
-                remoteRef:
-                  remoteKey: config
+  additionalResources:
+    - manifestPath: ../bootstrap/manifests/external-secrets
+      type: manifests
 
 crossplane:
   enabled: true
@@ -216,6 +206,16 @@ crossplane:
   selectorMatchLabels:
     cnoe.io/cluster: bootstrap
   chartRepository: "https://charts.upbound.io/stable"
+  ignoreDifferences:
+    - group: v1
+      kind: ServiceAccount
+      jsonPointers:
+        - /metadata/annotations/azure.workload.identity~1client-id
+        - /metadata/annotations/azure.workload.identity~1tenant-id
+        - /metadata/annotations/azure.workload.identity~1service-account-token-expiration
+  additionalResources:
+    - manifestPath: ../bootstrap/manifests/crossplane
+      type: manifests
   valuesObject:
     extraObjects:
       - apiVersion: networking.k8s.io/v1
@@ -234,30 +234,6 @@ crossplane:
                         name: webui
                         port:
                           number: 80
-
-      - apiVersion: kubernetes.m.crossplane.io/v1alpha1
-        kind: ClusterProviderConfig
-        metadata:
-          annotations:
-            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-          name: default
-        spec:
-          credentials:
-            source: InjectedIdentity
-
-      - apiVersion: azure.m.upbound.io/v1beta1
-        kind: ClusterProviderConfig
-        metadata:
-          annotations:
-            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-          name: default
-        spec:
-          credentials:
-            source: Secret
-            secretRef:
-              key: credentials
-              name: provider-azure
-              namespace: crossplane-system
 
       - apiVersion: containerservice.azure.m.upbound.io/v1beta1
         kind: KubernetesCluster
@@ -336,33 +312,3 @@ crossplane:
               - roleDefinitionName: Owner
                 scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}"
             serviceAccountName: crossplane
-
-      - apiVersion: batch/v1
-        kind: Job
-        metadata:
-          name: provider-kubernetes-config
-          namespace: crossplane-system
-          annotations:
-            argocd.argoproj.io/sync-wave: "50"
-        spec:
-          template:
-            spec:
-              serviceAccountName: upbound-controller-manager
-              restartPolicy: Never
-              containers:
-                - name: provider-kubernetes-config
-                  image: docker.io/bitnamilegacy/kubectl
-                  command: ["/bin/bash", "-c"]
-                  args:
-                    - |
-                      #! /bin/bash
-                      set -e -o pipefail
-
-                      while [[ $(kubectl -n crossplane-system get sa -o yaml | yq '[.items[] | select(.metadata.name=="*provider-kubernetes*")] | length') -eq 0 ]]; do
-                        sleep 5
-                      done
-                      SA=$(kubectl -n crossplane-system get sa -o yaml | yq '.items[] | select(.metadata.name=="*provider-kubernetes*").metadata.name')
-                      kubectl create clusterrolebinding provider-kubernetes-admin-binding \
-                        --clusterrole cluster-admin \
-                        --serviceaccount="crossplane-system:${SA}" && \
-                      echo "Done" || echo "Error"

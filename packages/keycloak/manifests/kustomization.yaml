@@ -1,0 +1,8 @@
+# kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - external-secrets.yaml
+  - keycloak-cluster-secret-store.yaml
+  - user-sso-config-job.yaml
