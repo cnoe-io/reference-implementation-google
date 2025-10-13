@@ -11,6 +11,9 @@ cnoe:
   valueFiles:
     - ../bootstrap/cnoe-addons.yaml
     - ../addons/values.yaml
+  valuesObject:
+    annotations:
+      argocd.argoproj.io/sync-wave: "10"
 
 argocd-local:
   enabled: true
@@ -263,7 +266,7 @@ crossplane:
             cnoe.io/domain: "{{ .metadata.annotations.domain }}"
           labels:
             cnoe.io/domain: "{{ .metadata.annotations.domain }}"
-          name: "wildcard.local.{{ .metadata.annotations.domain }}"
+          name: cnoe-bootstrap
         spec:
           managementPolicies: ["Observe", "Update"]
           forProvider:

@@ -97,23 +97,7 @@ crossplane:
             roleAssignments:
               - roleDefinitionName: Key Vault Administrator
                 scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.KeyVault/vaults/{{ .metadata.annotations.keyvault }}"
-            serviceAccountName: workload-identity-sa
-      - apiVersion: azure.livewyer.io/v1alpha1
-        kind: WorkloadIdentity
-        metadata:
-          name: keycloak
-          namespace: keycloak
-          annotations:
-            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-        spec:
-          forProvider:
-            location: "{{ .metadata.annotations.location }}"
-            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
-            roleAssignments:
-              - roleDefinitionName: Key Vault Administrator
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.KeyVault/vaults/{{ .metadata.annotations.keyvault }}"
-            serviceAccountName: eso-store
+            serviceAccountName: external-secrets-sa
   additionalResources:
     - manifestPath: "manifests"
       type: "manifests"
@@ -181,14 +165,12 @@ external-secrets:
               authType: WorkloadIdentity
               vaultUrl: "https://{{ .metadata.annotations.keyvault }}.vault.azure.net"
               serviceAccountRef:
-                name: workload-identity-sa
+                name: external-secrets-sa
                 namespace: external-secrets
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
         metadata:
           name: keycloak
-          annotations:
-            argocd.argoproj.io/sync-wave: "60"
         spec:
           provider:
             kubernetes:
@@ -201,8 +183,8 @@ external-secrets:
                   key: ca.crt
               auth:
                 serviceAccount:
-                  name: eso-store
-                  namespace: keycloak
+                  name: external-secrets-sa
+                  namespace: external-secrets
   selector:
     matchExpressions:
       - key: environment

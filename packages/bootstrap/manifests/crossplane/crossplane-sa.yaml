@@ -4,7 +4,7 @@ metadata:
   name: crossplane-sa
   namespace: crossplane-system
   annotations:
-    argocd.argoproj.io/sync-wave: "50"
+    argocd.argoproj.io/sync-wave: "20"
 spec:
   template:
     spec:
@@ -19,14 +19,13 @@ spec:
               #! /bin/bash
               set -e -o pipefail
 
-              kubectl -n crossplane-system wait --for=condition=Ready=true --for=condition=Synced=true --timeout=600s userassignedidentities.managedidentity.azure.m.upbound.io crossplane
-              if [ $? -eq 0 ]; then
-                jq -n \
-                  --arg clientId "$(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.clientId')" \
-                  --arg tenantId "$(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.tenantId')" \
-                  '{clientId: $clientId, tenantId: $tenantId}' > /tmp/credentials.json
-                kubectl -n crossplane-system create secret generic crossplane-sa --from-file=credentials=/tmp/credentials.json
-              else
-                echo "Error"
-                exit 1
-              fi
+              while ! kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane; do sleep 10; done
+              kubectl -n crossplane-system wait --for=condition=Ready=true --timeout=600s userassignedidentities.managedidentity.azure.m.upbound.io crossplane
+              while [[ $(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider | has("clientId")') == false ]]; do sleep 10; done
+              while [[ $(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.clientId | test("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")') == false ]]; do sleep 10; done
+
+              jq -n \
+                --arg clientId "$(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.clientId')" \
+                --arg tenantId "$(kubectl -n crossplane-system get userassignedidentities.managedidentity.azure.m.upbound.io crossplane -o yaml | yq '.status.atProvider.tenantId')" \
+                '{clientId: $clientId, tenantId: $tenantId}' > /tmp/credentials.json || exit 1
+                kubectl -n crossplane-system create secret generic crossplane-sa --from-file=credentials=/tmp/credentials.json || exit 1

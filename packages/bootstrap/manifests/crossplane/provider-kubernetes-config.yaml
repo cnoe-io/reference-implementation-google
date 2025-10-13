@@ -3,8 +3,6 @@ kind: Job
 metadata:
   name: provider-kubernetes-config
   namespace: crossplane-system
-  annotations:
-    argocd.argoproj.io/sync-wave: "50"
 spec:
   template:
     spec:
