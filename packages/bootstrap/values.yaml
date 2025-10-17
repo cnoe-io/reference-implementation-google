@@ -5,7 +5,7 @@ addons-appset: # for non-path routing
   namespace: argocd
   releaseName: addons
   type: chart
-  path: packages/charts/appset # This path is relative to Github repo root
+  path: packages/appset-chart
   selector:
     matchExpressions:
       - key: environment
@@ -21,7 +21,7 @@ addons-appset-pr: # for path routing
   namespace: argocd
   releaseName: addons
   type: chart
-  path: packages/charts/appset # This path is relative to Github repo root
+  path: packages/appset-chart
   valueFiles:
     - "path-routing-values.yaml"
   selector:

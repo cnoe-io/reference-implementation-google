@@ -25,7 +25,7 @@ releases:
       - argocd/argocd
   - name: cnoe-appset
     namespace: argocd
-    chart: packages/charts/appset
+    chart: packages/appset-chart
     values:
       - packages/addons/values.yaml
     disableValidationOnInstall: true
