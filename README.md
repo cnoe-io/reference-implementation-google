@@ -1,6 +1,7 @@
 ![overview](docs/images/overview.png)
 
-> **_NOTE:_** Applications deployed in this repository are not meant or configured for production.
+> [!NOTE]
+> Applications deployed in this repository are a starting point to get environment into production.
 
 <!-- omit from toc -->
 # CNOE Azure Reference Implementation
