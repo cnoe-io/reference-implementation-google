@@ -11,9 +11,6 @@ cnoe:
   valueFiles:
     - ../bootstrap/cnoe-addons.yaml
     - ../addons/values.yaml
-  valuesObject:
-    annotations:
-      argocd.argoproj.io/sync-wave: "10"
 
 argocd-local:
   enabled: true
