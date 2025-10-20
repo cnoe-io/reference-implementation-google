@@ -16,15 +16,15 @@ tasks:
     cmds:
       - >-
         az aks create --sku base --enable-oidc-issuer --enable-workload-identity --output none \
-          --name "{{.CLUSTER_NAME}}" --kubernetes-version ${AKS_VERSION:-1.33} --node-vm-size ${AKS_NODE_SIZE:-standard_d4alds_v6}
-      - az aks get-credentials --name "{{.CLUSTER_NAME}}" --overwrite-existing {{.AZ_CLI_OPTS}}
+          --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --kubernetes-version ${AKS_VERSION:-1.33} --node-vm-size ${AKS_NODE_SIZE:-standard_d4alds_v6}
+      - az aks get-credentials --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --overwrite-existing {{.AZ_CLI_OPTS}}
       - task: test:config:update
         vars:
           OIDC_ISSUER:
-            sh: az aks show --name "{{.CLUSTER_NAME}}" --query "oidcIssuerProfile.issuerUrl" -o tsv --only-show-errors
+            sh: az aks show --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --query "oidcIssuerProfile.issuerUrl" -o tsv --only-show-errors
 
   test:aks:destroy:
     deps:
       - task: azure:init
     cmds:
-      - az aks delete --name "{{.CLUSTER_NAME}}" --yes {{.CLI_ARGS}}
+      - az aks delete --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --yes {{.CLI_ARGS}}
