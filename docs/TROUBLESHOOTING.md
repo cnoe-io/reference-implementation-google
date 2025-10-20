@@ -1,32 +1,47 @@
 <!-- omit from toc -->
+
 # Troubleshooting Guide - CNOE Azure Reference Implementation
 
-This guide covers common issues and their solutions when using the CNOE Azure Reference Implementation with Taskfile and Helmfile.
+This
+guide covers common issues and their solutions when using the CNOE Azure Reference Implementation with its Kind cluster bootstrap approach.
 
 > Note: Most issues are related to missing prerequisites, authentication, networking, or resource constraints. Start with verifying prerequisites and work systematically through the troubleshooting steps.
 
 <!-- omit from toc -->
+
 ## Table of Contents
 
 - [Installation Issues](#installation-issues)
   - [Task Installation Fails](#task-installation-fails)
+  - [Kind Cluster Creation Issues](#kind-cluster-creation-issues)
   - [Helmfile Deployment Issues](#helmfile-deployment-issues)
-  - [Azure Workload Identity Issues](#azure-workload-identity-issues)
+  - [Azure Credentials Issues](#azure-credentials-issues)
 - [Configuration Issues](#configuration-issues)
+  - [Configuration File Validation](#configuration-file-validation)
   - [GitHub Integration Problems](#github-integration-problems)
   - [Domain and DNS Issues](#domain-and-dns-issues)
-  - [Azure Key Vault Issues](#azure-key-vault-issues)
+  - [Azure Resource Creation Issues](#azure-resource-creation-issues)
 - [General Troubleshooting Approach](#general-troubleshooting-approach)
-  - [1. Check ArgoCD Applications](#1-check-argocd-applications)
-  - [2. Check Taskfile Operations](#2-check-taskfile-operations)
-  - [3. Common Diagnostic Commands](#3-common-diagnostic-commands)
+  - [1. Check Kind Cluster Status](#1-check-kind-cluster-status)
+  - [2. Check ArgoCD Applications](#2-check-argocd-applications)
+  - [3. Check Crossplane Resources](#3-check-crossplane-resources)
+  - [4. Common Diagnostic Commands](#4-common-diagnostic-commands)
   - [Common Log Locations](#common-log-locations)
+- [Bootstrap Environment Issues](#bootstrap-environment-issues)
+  - [Local ArgoCD Issues](#local-argocd-issues)
+  - [Local Crossplane Issues](#local-crossplane-issues)
+  - [Local DNS Issues](#local-dns-issues)
+- [Target AKS Cluster Issues](#target-aks-cluster-issues)
+  - [AKS Connection Issues](#aks-connection-issues)
+  - [Component Deployment Issues](#component-deployment-issues)
+  - [Workload Identity Issues](#workload-identity-issues)
 - [Component-Specific Issues](#component-specific-issues)
   - [ArgoCD Issues](#argocd-issues)
     - [ArgoCD Not Accessible](#argocd-not-accessible)
     - [Applications Not Syncing](#applications-not-syncing)
   - [Crossplane Issues](#crossplane-issues)
     - [Provider Not Ready](#provider-not-ready)
+    - [Azure Resource Creation Failures](#azure-resource-creation-failures)
   - [ExternalDNS Issues](#externaldns-issues)
     - [DNS Records Not Created](#dns-records-not-created)
   - [Cert-Manager Issues](#cert-manager-issues)
@@ -58,10 +73,10 @@ This guide covers common issues and their solutions when using the CNOE Azure Re
 
 **Common Causes**:
 
-1. Missing prerequisite Azure resources (AKS cluster, DNS zone, Key Vault)
-2. Incorrect configuration in config.yaml
+1. Missing prerequisite Azure resources (AKS cluster, DNS zone)
+2. Incorrect configuration in `config.yaml` or `private/azure-credentials.json`
 3. Azure CLI not authenticated
-4. Incorrect cluster context
+4. Kind not installed or Docker not running
 5. Missing required tools
 
 **Debug Steps**:
@@ -70,19 +85,18 @@ This guide covers common issues and their solutions when using the CNOE Azure Re
 # Verify prerequisite Azure resources exist
 az aks show --name $(yq '.cluster_name' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
 az network dns zone show --name $(yq '.domain' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
-az keyvault show --name $(yq '.keyvault' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
 
 # Verify required tools
-which az kubectl yq jq helm helmfile task
+which az kubectl yq helm helmfile task kind yamale
+
+# Check Docker is running (required for Kind)
+docker info
 
 # Check Azure CLI login
 az account show
 
-# Verify correct cluster context
-kubectl config current-context
-
-# Validate configuration file
-yq '.' config.yaml
+# Validate configuration files
+task config:lint
 
 # Check cluster OIDC issuer
 az aks show --name $(yq '.cluster_name' config.yaml) \
@@ -90,13 +104,52 @@ az aks show --name $(yq '.cluster_name' config.yaml) \
   --query "oidcIssuerProfile.issuerUrl" -o tsv
 ```
 
-### Helmfile Deployment Issues
+### Kind Cluster Creation Issues
 
-**Symptoms**: Helmfile fails to deploy ArgoCD
+**Symptoms**: Kind cluster fails to create
 
 **Debug Steps**:
 
 ```bash
+# Check Docker is running
+docker ps
+
+# Check Kind configuration
+yq '.' kind.yaml
+
+# Try creating cluster manually
+kind create cluster --config kind.yaml --name $(yq '.name' kind.yaml)
+
+# Check for port conflicts
+netstat -tulpn | grep -E ':(80|443|30080|30443)'
+
+# Check disk space
+df -h
+```
+
+**Common Fixes**:
+
+```bash
+# Remove existing Kind cluster
+task kind:delete
+
+# Clean up Docker resources
+docker system prune
+
+# Recreate cluster
+task kind:create
+```
+
+### Helmfile Deployment Issues
+
+**Symptoms**: Helmfile fails to deploy to Kind cluster
+
+**Debug Steps**:
+
+```bash
+# Switch to Kind context
+task kubeconfig:set-context:kind
+
 # Check Helmfile syntax
 task helmfile:lint
 
@@ -108,167 +161,349 @@ helm repo list
 
 # Manual Helmfile debug
 helmfile --debug diff
+
+# Check Kind cluster nodes
+kubectl get nodes
 ```
 
-### Azure Workload Identity Issues
+### Azure Credentials Issues
 
-**Symptoms**: Components can't authenticate to Azure services
+**Symptoms**: Crossplane cannot authenticate to Azure
 
 **Debug Steps**:
 
 ```bash
-# Check managed identity creation
-az identity list --resource-group $(yq '.resource_group' config.yaml)
+# Validate Azure credentials file
+task config:lint
 
-# Verify federated credentials
-az identity federated-credential list \
-  --name crossplane \
-  --resource-group $(yq '.resource_group' config.yaml)
+# Check credentials format
+cat private/azure-credentials.json | yq '.'
 
-# Check service account annotations
-kubectl get sa crossplane -n crossplane-system -o yaml
+# Test Azure authentication manually
+az login --service-principal \
+  --username $(yq '.clientId' private/azure-credentials.json) \
+  --password $(yq '.clientSecret' private/azure-credentials.json) \
+  --tenant $(yq '.tenantId' private/azure-credentials.json)
 
-# Verify workload identity resources
-kubectl get workloadidentities.azure.livewyer.io -A -o yaml
+# Check if credentials are loaded in Crossplane
+kubectl get secret provider-azure -n crossplane-system -o yaml
 ```
 
 **Common Fixes**:
 
 ```bash
-# Update Azure credentials (for demo environments only)
-task azure:creds:delete
-task azure:creds:create
+# Recreate credentials file from template
+cp private/azure-credentials.template.json private/azure-credentials.json
+# Edit with your actual credentials
 
-# Update workload identity configuration
-task update:secret:azure
+# Restart Crossplane provider
+kubectl rollout restart deployment/crossplane -n crossplane-system
 ```
-
-> **Important**: The `azure:creds:*` tasks are helper functions for demonstration only. In production, Azure identities should be managed through your organization's infrastructure management approach.
 
 ## Configuration Issues
 
+### Configuration File Validation
+
+**Symptoms**: Configuration validation fails
+
+**Debug Steps**:
+
+```bash
+# Run configuration validation
+task config:lint
+
+# Check config.yaml syntax
+yq '.' config.yaml
+
+# Check azure-credentials.json syntax
+yq '.' private/azure-credentials.json
+
+# Validate against schema
+yamale -s config.schema.yaml config.yaml
+yamale -s private/azure-credentials.schema.yaml private/azure-credentials.yaml
+```
+
 ### GitHub Integration Problems
 
-**Symptoms**: Backstage cannot connect to GitHub
+**Symptoms**: ArgoCD cannot connect to GitHub repositories
 
-**Solutions**:
+**Debug Steps**:
 
 ```bash
 # Verify GitHub configuration in config.yaml
 yq '.github' config.yaml
 
-# Check if configuration was uploaded to Key Vault
-az keyvault secret show --name config --vault-name $(yq '.keyvault' config.yaml)
+# Check GitHub App credentials
+# Ensure GitHub App is installed in your organization
 
-# Update configuration
-task update:secret
+# Test GitHub connectivity from Kind cluster
+kubectl run test-pod --rm -i --tty --image=curlimages/curl -- \
+  curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/user
 ```
-
-> **Important**: GitHub integration details are stored in `config.yaml`, not in private files. All configuration is centralized in this file and stored securely in Azure Key Vault.
 
 ### Domain and DNS Issues
 
-**Symptoms**: Services not accessible via domain names
+**Symptoms**: Local services not accessible via `*.local.<domain>` addresses
 
 **Debug Steps**:
 
 ```bash
-# Check DNS resolution
-nslookup backstage.YOUR_DOMAIN
+# Check DNS resolution for local services
+nslookup argocd.local.YOUR_DOMAIN
+nslookup crossplane.local.YOUR_DOMAIN
 
-# Verify ingress configuration
+# Check if local DNS record was created
+az network dns record-set a show \
+  --name "*.local" \
+  --zone-name $(yq '.domain' config.yaml) \
+  --resource-group $(yq '.resource_group' config.yaml)
+
+# Check ingress configuration in Kind cluster
+task kubeconfig:set-context:kind
 kubectl get ingress -A
 
-# Check external-dns logs
-kubectl logs -n external-dns deployment/external-dns
-
-# Test load balancer IP
-kubectl get svc -n ingress-nginx ingress-nginx-controller
-curl -H "Host: backstage.YOUR_DOMAIN" http://LOAD_BALANCER_IP
+# Test local services directly
+curl -H "Host: argocd.local.YOUR_DOMAIN" http://localhost
 ```
 
-### Azure Key Vault Issues
+### Azure Resource Creation Issues
 
-**Symptoms**: External secrets cannot fetch secrets from Key Vault
+**Symptoms**: Crossplane fails to create Azure resources (Key Vault, Workload Identity)
 
 **Debug Steps**:
 
 ```bash
-# Check Key Vault access
-az keyvault secret list --vault-name $(yq '.keyvault' config.yaml)
+# Switch to Kind context
+task kubeconfig:set-context:kind
 
-# Verify external-secrets logs
-kubectl logs -n external-secrets deployment/external-secrets
+# Check Crossplane logs
+kubectl logs -n crossplane-system deployment/crossplane
 
-# Check workload identity for external-secrets
-kubectl get workloadidentity external-secrets -n external-secrets -o yaml
+# Check Azure provider status
+kubectl get providers
 
-# Test Key Vault connectivity
-kubectl run test-pod --rm -i --tty --image=mcr.microsoft.com/azure-cli -- az keyvault secret list --vault-name $(yq '.keyvault' config.yaml)
+# Check managed resources
+kubectl get managed -A
+
+# Check specific resources
+kubectl get vault -A
+kubectl get workloadidentity -A
+
+# Check Azure RBAC permissions
+az role assignment list --assignee $(yq '.clientId' private/azure-credentials.json)
 ```
 
 ## General Troubleshooting Approach
 
-### 1. Check ArgoCD Applications
+### 1. Check Kind Cluster Status
 
-All components are deployed as ArgoCD applications. Start by checking their status:
+Start troubleshooting with the bootstrap environment:
 
 ```bash
-# Get ArgoCD admin password
+# Check Kind cluster exists and is running
+kind get clusters
+kubectl cluster-info --context kind-$(yq '.name' kind.yaml)
+
+# Check nodes
+task kubeconfig:set-context:kind
+kubectl get nodes
+
+# Check system pods
+kubectl get pods -A
+```
+
+### 2. Check ArgoCD Applications
+
+Monitor the bootstrap ArgoCD for deployment status:
+
+```bash
+# Access local ArgoCD UI
+# Navigate to: http://argocd.local.<your-domain>
+
+# Get local ArgoCD admin password
+task kubeconfig:set-context:kind
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
-# Port forward to ArgoCD UI
-kubectl port-forward svc/argocd-server -n argocd 8080:80
-```
-
-Navigate to http://localhost:8080 and login with username `admin` to view:
-
-- Application sync status
-- Resource health
-- Event logs
-- Sync history
-
-### 2. Check Taskfile Operations
-
-```bash
-# View available tasks
-task --list-all
-
-# Check configuration
-task diff
-
-# Verify Helmfile status
-task helmfile:status
-```
-
-### 3. Common Diagnostic Commands
-
-```bash
-# Check cluster connectivity
-kubectl cluster-info
-
-# View all ArgoCD applications
+# Check application status via CLI
 kubectl get applications -n argocd
-
-# Check application sets
 kubectl get applicationsets -n argocd
+```
 
-# View workload identities
-kubectl get workloadidentities.azure.livewyer.io -A
+### 3. Check Crossplane Resources
+
+Monitor Azure resource creation:
+
+```bash
+# Access local Crossplane dashboard
+# Navigate to: http://crossplane.local.<your-domain>
+
+# Check Crossplane resources via CLI
+kubectl get managed -A
+kubectl get workloadidentity -A
+kubectl get vault -A
+```
+
+### 4. Common Diagnostic Commands
+
+```bash
+# Check overall cluster health
+kubectl get nodes
+kubectl get pods -A --field-selector=status.phase!=Running
+
+# Check events for errors
+kubectl get events -A --sort-by=.metadata.creationTimestamp
+
+# Check resource usage
+kubectl top nodes
+kubectl top pods -A
 ```
 
 ### Common Log Locations
 
 ```bash
-# ArgoCD logs
+# ArgoCD logs (Kind cluster)
 kubectl logs -n argocd deployment/argocd-application-controller
 kubectl logs -n argocd deployment/argocd-server
 
-# Component logs
-kubectl logs -n NAMESPACE deployment/COMPONENT_NAME
+# Crossplane logs (Kind cluster)
+kubectl logs -n crossplane-system deployment/crossplane
 
-# System logs
-journalctl -u kubelet (on cluster nodes)
+# Component logs (AKS cluster)
+task kubeconfig:set-context:aks
+kubectl logs -n NAMESPACE deployment/COMPONENT_NAME
+```
+
+## Bootstrap Environment Issues
+
+### Local ArgoCD Issues
+
+**Symptoms**: Cannot access ArgoCD at `argocd.local.<domain>`
+
+**Debug Steps**:
+
+```bash
+# Switch to Kind context
+task kubeconfig:set-context:kind
+
+# Check ArgoCD pods
+kubectl get pods -n argocd
+
+# Check ingress configuration
+kubectl get ingress -n argocd
+
+# Check if DNS record exists
+az network dns record-set a show \
+  --name "*.local" \
+  --zone-name $(yq '.domain' config.yaml) \
+  --resource-group $(yq '.resource_group' config.yaml)
+
+# Port forward to bypass ingress
+kubectl port-forward svc/argocd-server -n argocd 8080:80
+```
+
+### Local Crossplane Issues
+
+**Symptoms**: Cannot access Crossplane dashboard or resources not creating
+
+**Debug Steps**:
+
+```bash
+# Check Crossplane pods
+kubectl get pods -n crossplane-system
+
+# Check provider installation
+kubectl get providers
+
+# Check provider configuration
+kubectl get providerconfigs
+
+# Check crossplane logs
+kubectl logs -n crossplane-system deployment/crossplane
+
+# Check Azure provider logs
+kubectl logs -n crossplane-system -l pkg.crossplane.io/provider=azure
+```
+
+### Local DNS Issues
+
+**Symptoms**: `*.local.<domain>` addresses not resolving
+
+**Debug Steps**:
+
+```bash
+# Check if DNS record was created by Crossplane
+kubectl get dnsarecord -A
+
+# Check DNS record in Azure
+az network dns record-set a show \
+  --name "*.local" \
+  --zone-name $(yq '.domain' config.yaml) \
+  --resource-group $(yq '.resource_group' config.yaml)
+
+# Check external-dns logs (if applicable)
+kubectl logs -n external-dns deployment/external-dns
+```
+
+## Target AKS Cluster Issues
+
+### AKS Connection Issues
+
+**Symptoms**: Cannot connect to or deploy to AKS cluster
+
+**Debug Steps**:
+
+```bash
+# Verify AKS cluster credentials
+task kubeconfig:set-context:aks
+kubectl cluster-info
+
+# Check if cluster is accessible
+kubectl get nodes
+
+# Verify OIDC issuer configuration
+az aks show --name $(yq '.cluster_name' config.yaml) \
+  --resource-group $(yq '.resource_group' config.yaml) \
+  --query "oidcIssuerProfile.issuerUrl" -o tsv
+```
+
+### Component Deployment Issues
+
+**Symptoms**: Components not deploying to AKS cluster from Kind-based ArgoCD
+
+**Debug Steps**:
+
+```bash
+# Check ArgoCD application status (from Kind cluster)
+task kubeconfig:set-context:kind
+kubectl get applications -n argocd
+
+# Check if ArgoCD can reach AKS cluster
+kubectl get secret cnoe -n argocd -o yaml
+
+# Check logs for deployment issues
+kubectl logs -n argocd deployment/argocd-application-controller
+```
+
+### Workload Identity Issues
+
+**Symptoms**: Services on AKS cannot authenticate to Azure
+
+**Debug Steps**:
+
+```bash
+# Switch to AKS context
+task kubeconfig:set-context:aks
+
+# Check if workload identity was created
+az identity list --resource-group $(yq '.resource_group' config.yaml)
+
+# Check service account annotations
+kubectl get sa -A -o yaml | grep azure.workload.identity
+
+# Check federated credentials
+az identity federated-credential list \
+  --name crossplane \
+  --resource-group $(yq '.resource_group' config.yaml)
 ```
 
 ## Component-Specific Issues
@@ -277,39 +512,42 @@ journalctl -u kubelet (on cluster nodes)
 
 #### ArgoCD Not Accessible
 
-**Symptoms**: Cannot access ArgoCD UI
+**Symptoms**: Cannot access ArgoCD UI on AKS cluster
 
 **Debug Steps**:
 
 ```bash
+# Switch to AKS context
+task kubeconfig:set-context:aks
+
 # Check ArgoCD deployment
 kubectl get pods -n argocd
 
 # Check ingress
 kubectl get ingress -n argocd
 
-# Check service
-kubectl get svc -n argocd argocd-server
+# Get service URLs
+task get:urls
 
-# Check logs
-kubectl logs -n argocd deployment/argocd-server
+# Port forward to bypass ingress
+kubectl port-forward svc/argocd-server -n argocd 8080:80
 ```
 
 #### Applications Not Syncing
 
 **Symptoms**: ArgoCD applications stuck in "OutOfSync" or "Unknown" state
 
-**Common Fix**:
+**Debug Steps**:
 
 ```bash
+# Check application status
+kubectl get applications -n argocd
+
+# Check repository connectivity
+kubectl exec -n argocd deployment/argocd-server -- argocd repo list
+
 # Force refresh application
 kubectl patch app APP_NAME -n argocd --type merge --patch '{"operation":{"initiatedBy":{"automated":true}}}'
-
-# Check repository access
-kubectl get secret -n argocd argocd-repo-server-tls-certs-cm
-
-# Verify repository connectivity
-kubectl exec -n argocd deployment/argocd-server -- argocd repo list
 ```
 
 ### Crossplane Issues
@@ -321,46 +559,54 @@ kubectl exec -n argocd deployment/argocd-server -- argocd repo list
 **Debug Steps**:
 
 ```bash
+# Switch to Kind context (where Crossplane is running)
+task kubeconfig:set-context:kind
+
 # Check provider status
 kubectl get providers
 
 # Check provider config
 kubectl get providerconfigs
 
-# Check crossplane logs
-kubectl logs -n crossplane-system deployment/crossplane
+# Check azure credentials secret
+kubectl get secret provider-azure -n crossplane-system -o yaml
+```
 
-# Verify workload identity
-kubectl describe workloadidentity crossplane -n crossplane-system
+#### Azure Resource Creation Failures
+
+**Symptoms**: Azure resources (Key Vault, Workload Identity) not being created
+
+**Debug Steps**:
+
+```bash
+# Check managed resources
+kubectl get managed -A
+
+# Check specific resource events
+kubectl describe vault VAULT_NAME
+kubectl describe workloadidentity IDENTITY_NAME
+
+# Check Azure permissions
+az role assignment list --assignee $(yq '.clientId' private/azure-credentials.json)
 ```
 
 ### ExternalDNS Issues
 
 #### DNS Records Not Created
 
-**Symptoms**: DNS records are not automatically created
+**Symptoms**: DNS records are not automatically created on AKS cluster
 
 **Debug Steps**:
 
 ```bash
+# Switch to AKS context
+task kubeconfig:set-context:aks
+
 # Check external-dns logs
 kubectl logs -n external-dns deployment/external-dns
 
-# Check workload identity
-kubectl get workloadidentity external-dns -n external-dns -o yaml
-
-# Verify DNS zone permissions
+# Check DNS zone permissions
 az role assignment list --scope "/subscriptions/$(yq '.subscription' config.yaml)/resourceGroups/$(yq '.resource_group' config.yaml)/providers/Microsoft.Network/dnszones/$(yq '.domain' config.yaml)"
-```
-
-**Common Fix**:
-
-```bash
-# Update external-dns workload identity (demo environments)
-task update:secret:external-dns
-
-# Check domain configuration
-yq '.domain' config.yaml
 
 # Verify DNS zone exists
 az network dns zone show --name $(yq '.domain' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
@@ -375,6 +621,10 @@ az network dns zone show --name $(yq '.domain' config.yaml) --resource-group $(y
 **Debug Steps**:
 
 ```bash
+# Switch
+ to AKS context
+task kubeconfig:set-context:aks
+
 # Check certificate status
 kubectl get certificates -A
 
@@ -391,23 +641,18 @@ kubectl get clusterissuers
 kubectl logs -n cert-manager deployment/cert-manager
 ```
 
-**Common Error Messages**:
-
-```
-Get "http://example.com/.well-known/acme-challenge/...": dial tcp: lookup example.com: no such host
-```
-
-**Solution**: DNS propagation delay. Wait 5-10 minutes for DNS to propagate.
-
 ### Keycloak Issues
 
 #### Keycloak Pod Failing
 
-**Symptoms**: Keycloak pods crash or fail to start
+**Symptoms**: Keycloak pods crash or fail to start on AKS cluster
 
 **Debug Steps**:
 
 ```bash
+# Switch to AKS context
+task kubeconfig:set-context:aks
+
 # Check pod status
 kubectl get pods -n keycloak
 
@@ -432,7 +677,7 @@ kubectl get secrets -n keycloak
 curl -k https://keycloak.YOUR_DOMAIN/realms/cnoe/.well-known/openid-configuration
 
 # Check user secrets
-kubectl get secrets -n keycloak keycloak-user-config -o yaml
+kubectl get secrets -n keycloak keycloak-config -o yaml
 
 # Verify Backstage configuration
 kubectl get configmap -n backstage backstage-config -o yaml
@@ -442,11 +687,14 @@ kubectl get configmap -n backstage backstage-config -o yaml
 
 #### Backstage Pod Crashing
 
-**Symptoms**: Backstage pods fail to start
+**Symptoms**: Backstage pods fail to start on AKS cluster
 
 **Debug Steps**:
 
 ```bash
+# Switch to AKS context
+task kubeconfig:set-context:aks
+
 # Check pod logs
 kubectl logs -n backstage deployment/backstage
 
@@ -456,7 +704,7 @@ kubectl get configmap -n backstage -o yaml
 # Check secrets
 kubectl get secrets -n backstage -o yaml
 
-# Verify GitHub integration configuration in config.yaml
+# Verify GitHub integration configuration
 yq '.github' config.yaml
 ```
 
@@ -464,11 +712,14 @@ yq '.github' config.yaml
 
 #### Load Balancer Not Created
 
-**Symptoms**: ingress-nginx service has no external IP
+**Symptoms**: ingress-nginx service has no external IP on AKS cluster
 
 **Debug Steps**:
 
 ```bash
+# Switch to AKS context
+task kubeconfig:set-context:aks
+
 # Check service status
 kubectl get svc -n ingress-nginx
 
@@ -490,22 +741,25 @@ az network lb list --resource-group MC_$(yq '.resource_group' config.yaml)_$(yq 
 1. DNS propagation delays
 2. Certificate issuance delays
 3. Image pull issues
-4. Resource constraints
+4. Resource constraints on Kind cluster or AKS
 
 **Debug Steps**:
 
 ```bash
-# Check node resources
+# Check Kind cluster resources
+task kubeconfig:set-context:kind
 kubectl top nodes
-
-# Check pod resources
 kubectl top pods -A
 
-# Scale up cluster if needed (using your infrastructure management approach)
-# Example for testing: az aks scale --name CLUSTER --resource-group RG --node-count 3
+# Check AKS cluster resources
+task kubeconfig:set-context:aks
+kubectl top nodes
 
 # Check image pull status
-kubectl get events -A --sort-by=.metadata.creationTimestamp
+kubectl get events -A --sort-by=.metadata.creationTimestamp | grep Pull
+
+# Monitor Crossplane resource creation
+kubectl get managed -A -w
 ```
 
 ### High Resource Usage
@@ -515,7 +769,7 @@ kubectl get events -A --sort-by=.metadata.creationTimestamp
 **Debug Steps**:
 
 ```bash
-# Check resource requests and limits
+# Check resource requests and limits on both clusters
 kubectl describe nodes
 
 # Identify resource-hungry pods
@@ -531,23 +785,26 @@ kubectl get pv
 ### Reinstalling Components
 
 ```bash
-# Reinstall specific component
-kubectl delete app COMPONENT_NAME -n argocd
-task sync
-
-# Full reinstall
+# Clean reinstall
 task uninstall
 task install
+
+# Reinstall only AKS components (keep Kind cluster)
+task kubeconfig:set-context:kind
+kubectl -n argocd delete app cnoe
+task sync
 ```
 
 ### Backup and Restore
 
 ```bash
-# Backup ArgoCD configuration
+# Backup ArgoCD configuration from Kind cluster
+task kubeconfig:set-context:kind
 kubectl get applications -n argocd -o yaml > argocd-apps-backup.yaml
 
-# Backup configuration from Key Vault
-az keyvault secret show --name config --vault-name $(yq '.keyvault' config.yaml) > config-backup.json
+# Backup configuration
+cp config.yaml config-backup.yaml
+cp private/azure-credentials.json private/azure-credentials-backup.json
 
 # Restore from backup
 kubectl apply -f argocd-apps-backup.yaml
@@ -556,12 +813,14 @@ kubectl apply -f argocd-apps-backup.yaml
 ### Emergency Access
 
 ```bash
-# Direct kubectl access to services
+# Direct kubectl access to services on AKS
+task kubeconfig:set-context:aks
 kubectl port-forward svc/argocd-server -n argocd 8080:80
 kubectl port-forward svc/backstage -n backstage 3000:7007
 
-# Reset ArgoCD admin password
-kubectl patch secret argocd-initial-admin-secret -n argocd -p '{"data":{"password":"'$(echo -n 'new-password' | base64)'"}}'
+# Access Kind cluster services
+task kubeconfig:set-context:kind
+kubectl port-forward svc/argocd-server -n argocd 8080:80
 ```
 
 ## Getting Help
@@ -571,25 +830,45 @@ kubectl patch secret argocd-initial-admin-secret -n argocd -p '{"data":{"passwor
 ```bash
 # Create diagnostic bundle
 mkdir cnoe-diagnostics
-kubectl cluster-info dump --output-directory=cnoe-diagnostics/cluster-info
-kubectl get events -A --sort-by=.metadata.creationTimestamp > cnoe-diagnostics/events.yaml
-kubectl get pods -A -o yaml > cnoe-diagnostics/pods.yaml
+
+# Collect Kind cluster information
+task kubeconfig:set-context:kind
+kubectl cluster-info dump --output-directory=cnoe-diagnostics/kind-cluster-info
+kubectl get events -A --sort-by=.metadata.creationTimestamp > cnoe-diagnostics/kind-events.yaml
+kubectl get pods -A -o yaml > cnoe-diagnostics/kind-pods.yaml
+
+# Collect AKS cluster information
+task kubeconfig:set-context:aks
+kubectl cluster-info dump --output-directory=cnoe-diagnostics/aks-cluster-info
+kubectl get events -A --sort-by=.metadata.creationTimestamp > cnoe-diagnostics/aks-events.yaml
+kubectl get pods -A -o yaml > cnoe-diagnostics/aks-pods.yaml
+
+# Collect configuration
 task helmfile:status > cnoe-diagnostics/helmfile-status.txt
 yq '.' config.yaml > cnoe-diagnostics/config.yaml
+# DO NOT include azure-credentials.json in diagnostic bundle for security reasons
+
+# Collect Azure resources
+az resource list --resource-group $(yq '.resource_group' config.yaml) > cnoe-diagnostics/azure-resources.json
 ```
 
 ### Additional Resources
 
 - [CNOE Community](https://cnoe.io/community)
 - [ArgoCD Documentation](https://argo-cd.readthedocs.io/)
+- [Crossplane Documentation](https://docs.crossplane.io/)
 - [Backstage Documentation](https://backstage.io/docs/)
+- [Kind Documentation](https://kind.sigs.k8s.io/)
 
 ## Prevention Tips
 
-1. **Proper Prerequisites**: Ensure all Azure resources are properly provisioned before installation
-2. **Configuration Management**: Keep config.yaml up-to-date and validate before applying changes
+1. **Proper Prerequisites**: Ensure AKS cluster and DNS zone are properly provisioned before installation
+2. **Configuration Management**: Keep `config.yaml` and `azure-credentials.json` up-to-date and validate before applying changes
 3. **Regular Updates**: Use `task sync` to keep components updated
-4. **Monitor Resources**: Set up monitoring for cluster resources
+4. **Monitor Resources**: Set up monitoring for both Kind and AKS cluster resources
 5. **Backup Strategy**: Regular backups of critical configurations
 6. **Testing**: Test changes in a separate environment first
 7. **Infrastructure Management**: Use proper infrastructure management tools for production Azure resources
+8. **Docker Health**: Ensure Docker is running properly for Kind cluster operations
+9. **Network Connectivity**: Ensure reliable internet connection for image pulls and Azure API calls
+10. **Azure Permissions**: Verify service principal has necessary permissions for resource creation
