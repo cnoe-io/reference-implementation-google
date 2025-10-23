@@ -1,10 +1,19 @@
 sources:
   - ingress
 txtOwnerId: cnoe-external-dns
-policy: upsert-only
+policy: sync
 serviceAccount:
   create: false
-  labels:
-    "azure.workload.identity/use": "true"
+  name: external-dns
 podLabels:
-  "azure.workload.identity/use": "true"
+  azure.workload.identity/use: "true"
+commonLabels:
+  azure.workload.identity/use: "true"
+extraVolumes:
+  - name: azure-config-file
+    secret:
+      secretName: external-dns-azure
+extraVolumeMounts:
+  - name: azure-config-file
+    mountPath: /etc/kubernetes
+    readOnly: true

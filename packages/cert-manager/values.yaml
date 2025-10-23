@@ -2,6 +2,22 @@ installCRDs: true
 global:
   leaderElection:
     namespace: cert-manager
+webhook:
+  validatingWebhookConfiguration:
+    namespaceSelector:
+      matchExpressions:
+        - key: cert-manager.io/disable-validation
+          operator: NotIn
+          values:
+            - "true"
+        - key: kubernetes.azure.com/managedby
+          operator: NotIn
+          values:
+            - aks
+        - key: control-plane
+          operator: NotIn
+          values:
+            - "true"
 extraObjects:
   - |
     apiVersion: cert-manager.io/v1
@@ -13,6 +29,20 @@ extraObjects:
         server: https://acme-v02.api.letsencrypt.org/directory
         privateKeySecretRef:
           name: letsencrypt-prod
+        solvers:
+          - http01:
+              ingress:
+                ingressClassName: nginx
+  - |
+    apiVersion: cert-manager.io/v1
+    kind: ClusterIssuer
+    metadata:
+      name: letsencrypt-staging
+    spec:
+      acme:
+        server: https://acme-staging-v02.api.letsencrypt.org/directory
+        privateKeySecretRef:
+          name: letsencrypt-staging
         solvers:
           - http01:
               ingress:
@@ -33,4 +63,3 @@ extraObjects:
       dnsNames:
       - {{ .Values.global.domainName }}
     {{ end }}
- 

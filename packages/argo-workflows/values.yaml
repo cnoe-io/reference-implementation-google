@@ -6,10 +6,13 @@ workflow:
 server:
   ingress:
     enabled: true
-    ingressClassName: 'nginx'
+    ingressClassName: "nginx"
     pathType: ImplementationSpecific
+    annotations:
+      external-dns.alpha.kubernetes.io/ttl: "60"
   sso:
     enabled: true
+    insecureSkipVerify: true
     clientId: # Required for sso configuration
       name: keycloak-oidc
       key: ARGO_WORKFLOWS_CLIENT_ID
