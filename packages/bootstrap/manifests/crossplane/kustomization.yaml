@@ -5,4 +5,3 @@ kind: Kustomization
 resources:
   - providerconfig.yaml
   - provider-kubernetes-config.yaml
-  - crossplane-sa.yaml

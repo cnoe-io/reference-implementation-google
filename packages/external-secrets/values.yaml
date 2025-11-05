@@ -1,6 +1,1 @@
 installCRDs: true
-
-podLabels:
-  azure.workload.identity/use: "true"
-commonLabels:
-  azure.workload.identity/use: "true"

@@ -59,7 +59,7 @@ configs:
               end
             end
             return health_status
-      "*.azure.upbound.io/*":
+      "*.gcp.upbound.io/*":
           health.lua: |
             health_status = {
               status = "Progressing",
@@ -97,7 +97,7 @@ configs:
             end
 
             return health_status
-      "*.azure.crossplane.io/*":
+      "*.gcp.crossplane.io/*":
           health.lua: |
             health_status = {
               status = "Progressing",
@@ -134,7 +134,7 @@ configs:
               end
             end
             return health_status
-      "*.azure.livewyer.io/*":
+      "*.gcp.livewyer.io/*":
           health.lua: |
             health_status = {
               status = "Progressing",

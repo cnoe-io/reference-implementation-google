@@ -30,7 +30,7 @@ argocd-local:
         - /metadata/labelsapp.kubernetes.io~1managed-by
   valuesObject:
     global:
-      domain: "argocd.local.{{ .metadata.annotations.domain }}"
+      domain: "argocd.local.{{ .metadata.annotations.dnsDomain }}"
     configs:
       params:
         server.insecure: true
@@ -50,7 +50,7 @@ argocd:
     cnoe.io/cluster: cnoe
   valuesObject:
     global:
-      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
+      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.dnsDomain }}{{ else }}argocd.{{ .metadata.annotations.dnsDomain }}{{ end }}'
     server:
       ingress:
         annotations:
@@ -60,7 +60,7 @@ argocd:
       cm:
         oidc.config: |
           name: Keycloak
-          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe
+          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}/keycloak{{ end }}/realms/cnoe
           clientID: argocd
           enablePKCEAuthentication: true
           requestedScopes:
@@ -86,18 +86,15 @@ argocd:
             addonsRepoURL: "{{ .metadata.annotations.addonsRepoURL }}"
             addonsRepoRevision: "{{ .metadata.annotations.addonsRepoRevision }}"
             addonsRepoBasepath: "{{ .metadata.annotations.addonsRepoBasepath }}"
-            subscription: "{{ .metadata.annotations.subscription }}"
-            location: "{{ .metadata.annotations.location }}"
-            resourceGroup: "{{ .metadata.annotations.resourceGroup }}"
-            tenantId: "{{ .metadata.annotations.tenantId }}"
+            project: "{{ .metadata.annotations.project }}"
+            region: "{{ .metadata.annotations.region }}"
             clusterName: "{{ .metadata.annotations.clusterName }}"
-            clusterOIDCIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
-            domain: "{{ .metadata.annotations.domain }}"
-            keyvault: "{{.metadata.annotations.keyvault}}"
+            dnsZone: "{{ .metadata.annotations.dnsZone }}"
+            dnsDomain: "{{ .metadata.annotations.dnsDomain }}"
+            secretManager: "{{.metadata.annotations.secretManager}}"
             pathRouting: "{{ .metadata.annotations.pathRouting }}"
             letsencryptEnv: "{{ .metadata.annotations.letsencryptEnv }}"
-            crossplaneClientId: "{{ .metadata.annotations.crossplaneClientId }}"
-            crossplaneTenantId: "{{ .metadata.annotations.crossplaneTenantId }}"
+            crossplaneServiceAccountEmail: "{{ .metadata.annotations.crossplaneServiceAccountEmail }}"
         stringData:
           name: "{{ .metadata.annotations.clusterName }}"
           server: https://kubernetes.default.svc
@@ -177,22 +174,18 @@ external-secrets:
         metadata:
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-          name: azure-keyvault
+          name: gcp-secretmanager
         spec:
           provider:
-            azurekv:
-              vaultUrl: "https://{{ .metadata.annotations.keyvault }}.vault.azure.net"
-              authType: ServicePrincipal
-              tenantId: "{{ .metadata.annotations.tenantId }}"
-              authSecretRef:
-                clientId:
-                  key: clientId
-                  name: provider-azure
-                  namespace: crossplane-system
-                clientSecret:
-                  key: clientSecret
-                  name: provider-azure
-                  namespace: crossplane-system
+            gcpsm:
+              projectID: "{{ .metadata.annotations.project }}"
+              auth:
+                secretRef:
+                  secretAccessKeySecretRef:
+                    name: provider-gcp
+                    namespace: crossplane-system
+                    key: credentials
+
   additionalResources:
     - manifestPath: ../bootstrap/manifests/external-secrets
       type: manifests
@@ -206,13 +199,6 @@ crossplane:
   selectorMatchLabels:
     cnoe.io/cluster: bootstrap
   chartRepository: "https://charts.upbound.io/stable"
-  ignoreDifferences:
-    - group: v1
-      kind: ServiceAccount
-      jsonPointers:
-        - /metadata/annotations/azure.workload.identity~1client-id
-        - /metadata/annotations/azure.workload.identity~1tenant-id
-        - /metadata/annotations/azure.workload.identity~1service-account-token-expiration
   additionalResources:
     - manifestPath: ../bootstrap/manifests/crossplane
       type: manifests
@@ -224,7 +210,7 @@ crossplane:
           name: crossplane-dashboard
         spec:
           rules:
-            - host: "crossplane.local.{{ .metadata.annotations.domain }}"
+            - host: "crossplane.local.{{ .metadata.annotations.dnsDomain }}"
               http:
                 paths:
                   - path: /
@@ -235,8 +221,23 @@ crossplane:
                         port:
                           number: 80
 
-      - apiVersion: containerservice.azure.m.upbound.io/v1beta1
-        kind: KubernetesCluster
+      - apiVersion: gcp.m.upbound.io/v1beta1
+        kind: ClusterProviderConfig
+        metadata:
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+          name: default
+        spec:
+          projectID: "{{ .metadata.annotations.project }}"
+          credentials:
+            source: Secret
+            secretRef:
+              key: credentials
+              name: provider-gcp
+              namespace: crossplane-system
+
+      - apiVersion: container.gcp.m.upbound.io/v1beta1
+        kind: Cluster
         metadata:
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
@@ -248,53 +249,46 @@ crossplane:
           managementPolicies: ["Observe"]
           writeConnectionSecretToRef:
             name: cnoe-kubeconfig
-          initProvider:
-            defaultNodePool: {}
           forProvider:
-            location: "{{ .metadata.annotations.location }}"
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
+            location: "{{ .metadata.annotations.region }}"
 
-      - apiVersion: network.azure.m.upbound.io/v1beta1
-        kind: DNSARecord
+      - apiVersion: dns.gcp.m.upbound.io/v1beta1
+        kind: RecordSet
         metadata:
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
             crossplane.io/external-name: "*.local"
-            cnoe.io/domain: "{{ .metadata.annotations.domain }}"
+            cnoe.io/domain: "{{ .metadata.annotations.dnsDomain }}"
           labels:
-            cnoe.io/domain: "{{ .metadata.annotations.domain }}"
+            cnoe.io/domain: "{{ .metadata.annotations.dnsDomain }}"
           name: cnoe-bootstrap
-        spec:
-          managementPolicies: ["Observe", "Update"]
-          forProvider:
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
-            records:
-              - 127.0.0.1
-            ttl: 3600
-            zoneName: "{{ .metadata.annotations.domain }}"
-
-      - apiVersion: keyvault.azure.m.upbound.io/v1beta1
-        kind: Vault
-        metadata:
-          annotations:
-            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-            cnoe.io/keyvault: "{{ .metadata.annotations.keyvault }}"
-          labels:
-            cnoe.io/keyvault: "{{ .metadata.annotations.keyvault }}"
-          name: "{{ .metadata.annotations.keyvault }}"
         spec:
           managementPolicies: ["Observe", "Update", "Create"]
           forProvider:
-            location: "{{ .metadata.annotations.location }}"
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
-            tenantId: "{{ .metadata.annotations.tenantId }}"
-            enableRbacAuthorization: true
-            skuName: standard
-            softDeleteRetentionDays: 7
+            name: "*.local.{{ .metadata.annotations.dnsDomain }}."
+            rrdatas:
+              - 127.0.0.1
+            ttl: 3600
+            type: A
+            managedZone: "{{ .metadata.annotations.dnsZone }}"
+
+      - apiVersion: secretmanager.gcp.m.upbound.io/v1beta1
+        kind: Secret
+        metadata:
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+            cnoe.io/secret-manager: "{{ .metadata.annotations.secretManager }}"
+          labels:
+            cnoe.io/secret-manager: "{{ .metadata.annotations.secretManager }}"
+          name: "{{ .metadata.annotations.secretManager }}"
+        spec:
+          managementPolicies: ["Observe", "Update", "Create"]
+          forProvider:
+            secretId: config
             tags:
               managed-by: external-secrets
 
-      - apiVersion: azure.livewyer.io/v1alpha1
+      - apiVersion: gcp.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
           annotations:
@@ -305,10 +299,6 @@ crossplane:
         spec:
           managementPolicies: ["Observe", "Update", "Create"]
           forProvider:
-            location: "{{ .metadata.annotations.location }}"
-            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
-            roleAssignments:
-              - roleDefinitionName: Owner
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}"
-            serviceAccountName: crossplane
+            projectId: "{{ .metadata.annotations.project }}"
+            roles:
+              - roles/owner

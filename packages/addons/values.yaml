@@ -7,7 +7,7 @@ argocd:
   chartRepository: "https://argoproj.github.io/argo-helm"
   valuesObject:
     global:
-      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
+      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.dnsDomain }}{{ else }}argocd.{{ .metadata.annotations.dnsDomain }}{{ end }}'
     server:
       ingress:
         annotations:
@@ -17,7 +17,7 @@ argocd:
       cm:
         oidc.config: |
           name: Keycloak
-          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe
+          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}/keycloak{{ end }}/realms/cnoe
           clientID: argocd
           enablePKCEAuthentication: true
           requestedScopes:
@@ -45,28 +45,30 @@ crossplane:
   defaultVersion: "2.0.2-up.4"
   chartRepository: "https://charts.upbound.io/stable"
   valuesObject:
-    customLabels:
-      azure.workload.identity/use: "true"
-    serviceAccount:
-      customAnnotations:
-        azure.workload.identity/client-id: "{{ .metadata.annotations.crossplaneClientId }}"
-        azure.workload.identity/tenant-id: "{{ .metadata.annotations.crossplaneTenantId }}"
     extraObjects:
-      - apiVersion: azure.m.upbound.io/v1beta1
+      - apiVersion: pkg.crossplane.io/v1beta1
+        kind: DeploymentRuntimeConfig
+        metadata:
+          name: workload-identity
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+        spec:
+          serviceAccountTemplate:
+            metadata:
+              annotations:
+                iam.gke.io/gcp-service-account: "{{ .metadata.annotations.crossplaneServiceAccountEmail }}"
+              name: crossplane
+      - apiVersion: gcp.m.upbound.io/v1beta1
         kind: ClusterProviderConfig
         metadata:
           name: default
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
+          projectID: "{{ .metadata.annotations.project }}"
           credentials:
-            source: OIDCTokenFile
-            # source: UserAssignedManagedIdentity
-          oidcTokenFilePath: /var/run/secrets/azure/tokens/azure-identity-token
-          subscriptionID: "{{ .metadata.annotations.subscription }}"
-          clientID: "{{ .metadata.annotations.crossplaneClientId }}"
-          tenantID: "{{ .metadata.annotations.crossplaneTenantId }}"
-      - apiVersion: azure.livewyer.io/v1alpha1
+            source: InjectedIdentity
+      - apiVersion: gcp.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
           name: external-dns
@@ -75,14 +77,11 @@ crossplane:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
           forProvider:
-            location: "{{ .metadata.annotations.location }}"
-            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
-            roleAssignments:
-              - roleDefinitionName: DNS Zone Contributor
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.Network/dnszones/{{ .metadata.annotations.domain }}"
+            projectId: "{{ .metadata.annotations.project }}"
+            roles:
+              - roles/dns.admin
             serviceAccountName: external-dns
-      - apiVersion: azure.livewyer.io/v1alpha1
+      - apiVersion: gcp.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
           name: external-secrets
@@ -91,12 +90,9 @@ crossplane:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
         spec:
           forProvider:
-            location: "{{ .metadata.annotations.location }}"
-            oidcIssuerURL: "{{ .metadata.annotations.clusterOIDCIssuerURL }}"
-            resourceGroupName: "{{ .metadata.annotations.resourceGroup }}"
-            roleAssignments:
-              - roleDefinitionName: Key Vault Administrator
-                scope: "/subscriptions/{{ .metadata.annotations.subscription }}/resourceGroups/{{ .metadata.annotations.resourceGroup }}/providers/Microsoft.KeyVault/vaults/{{ .metadata.annotations.keyvault }}"
+            projectId: "{{ .metadata.annotations.project }}"
+            roles:
+              - roles/secretmanager.admin
             serviceAccountName: external-secrets-sa
   additionalResources:
     - manifestPath: "manifests"
@@ -114,15 +110,6 @@ ingress-nginx:
   releaseName: ingress-nginx
   defaultVersion: "4.7.0"
   chartRepository: "https://kubernetes.github.io/ingress-nginx"
-  valuesObject:
-    controller:
-      service:
-        type: LoadBalancer
-        externalTrafficPolicy: Local
-        annotations:
-          service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /healthz
-        targetPorts:
-          https: "https"
   selector:
     matchExpressions:
       - key: environment
@@ -138,9 +125,9 @@ external-dns:
   defaultVersion: "1.16.1"
   valuesObject:
     provider:
-      name: azure
+      name: google
     domainFilters:
-      - "{{ .metadata.annotations.domain }}"
+      - "{{ .metadata.annotations.dnsDomain }}"
   selector:
     matchExpressions:
       - key: environment
@@ -158,15 +145,16 @@ external-secrets:
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
         metadata:
-          name: azure-keyvault
+          name: gcp-secretmanager
         spec:
           provider:
-            azurekv:
-              authType: WorkloadIdentity
-              vaultUrl: "https://{{ .metadata.annotations.keyvault }}.vault.azure.net"
-              serviceAccountRef:
-                name: external-secrets-sa
-                namespace: external-secrets
+            gcpsm:
+              projectID: "{{ .metadata.annotations.project }}"
+              auth:
+                workloadIdentity:
+                  serviceAccountRef:
+                    name: external-secrets-sa
+                    namespace: external-secrets
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
         metadata:
@@ -200,7 +188,7 @@ cert-manager:
   chartRepository: "https://charts.jetstack.io"
   valuesObject:
     global:
-      domainName: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ end }}'
+      domainName: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.dnsDomain }}{{ end }}'
       pathRouting: '{{ if eq .metadata.annotations.pathRouting "true" }}true{{ else }}false{{ end }}'
   selector:
     matchExpressions:
@@ -218,12 +206,12 @@ keycloak:
   valuesObject:
     httpRelativePath: '/{{ if eq .metadata.annotations.pathRouting "true" }}keycloak/{{ end }}'
     ingress:
-      hostname: '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
+      hostname: '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}{{ end }}'
       annotations:
         cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-{{ .metadata.annotations.letsencryptEnv }}{{ end }}'
       extraTls:
         - hosts:
-            - '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
+            - '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}{{ end }}'
           secretName: keycloak-server-tls
   additionalResources:
     - manifestPath: "manifests"

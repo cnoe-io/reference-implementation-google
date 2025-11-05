@@ -2,29 +2,18 @@
 version: "3"
 
 tasks:
-  test:config:update:
+  test:gke:create:
     deps:
-      - task: config:lint
-    cmd: yq -i e '.cluster_oidc_issuer_url |= "{{.OIDC_ISSUER}}"' "{{.CONFIG_FILE}}"
-
-  test:aks:create:
-    deps:
-      - task: azure:init
+      - task: gcp:init
     env:
       KUBECONFIG:
         sh: echo ${HOME}/.kube/config
     cmds:
-      - >-
-        az aks create --sku base --enable-oidc-issuer --enable-workload-identity --output none \
-          --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --kubernetes-version ${AKS_VERSION:-1.33} --node-vm-size ${AKS_NODE_SIZE:-standard_d4alds_v6}
-      - az aks get-credentials --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --overwrite-existing {{.AZ_CLI_OPTS}}
-      - task: test:config:update
-        vars:
-          OIDC_ISSUER:
-            sh: az aks show --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --query "oidcIssuerProfile.issuerUrl" -o tsv --only-show-errors
+      - gcloud container clusters create-auto "$(yq '.cluster_name' {{.CONFIG_FILE}})" --enable-dns-access
+      - gcloud container clusters get-credentials "$(yq '.cluster_name' {{.CONFIG_FILE}})"
 
-  test:aks:destroy:
+  test:gke:destroy:
     deps:
-      - task: azure:init
+      - task: gcp:init
     cmds:
-      - az aks delete --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --yes {{.CLI_ARGS}}
+      - gcloud container clusters delete "$(yq '.cluster_name' {{.CONFIG_FILE}})" --quiet

@@ -8,8 +8,7 @@ env:
 
 vars:
   CONFIG_FILE: "{{.ROOT_DIR}}/config.yaml"
-  REQUIRED_CLIS: [az, kubectl, kubelogin, yq, helm, helmfile, yamale]
-  AZ_CLI_OPTS: --only-show-errors --output none
+  REQUIRED_CLIS: [gcloud, kubectl, kubelogin, yq, helm, helmfile, yamale]
 
 includes:
   test:
@@ -59,20 +58,20 @@ tasks:
     silent: true
     cmds:
       - cmd: yamale -s "{{.ROOT_DIR}}/config.schema.yaml" "{{.CONFIG_FILE}}"
-      - defer: rm -f "{{.ROOT_DIR}}/private/azure-credentials.yaml"
-      - cmd: test -f "{{.ROOT_DIR}}/private/azure-credentials.json" || (echo ERROR\:\ private/azure-credentials.json not found && exit 1)
-      - cmd: yq -o=yaml "{{.ROOT_DIR}}/private/azure-credentials.json" > "{{.ROOT_DIR}}/private/azure-credentials.yaml"
-      - cmd: yamale -s "{{.ROOT_DIR}}/private/azure-credentials.schema.yaml" "{{.ROOT_DIR}}/private/azure-credentials.yaml"
+      - defer: rm -f "{{.ROOT_DIR}}/private/gcp-credentials.yaml"
+      - cmd: test -f "{{.ROOT_DIR}}/private/gcp-credentials.json" || (echo ERROR\:\ private/gcp-credentials.json not found && exit 1)
+      - cmd: yq -o=yaml "{{.ROOT_DIR}}/private/gcp-credentials.json" > "{{.ROOT_DIR}}/private/gcp-credentials.yaml"
+      - cmd: yamale -s "{{.ROOT_DIR}}/private/gcp-credentials.schema.yaml" "{{.ROOT_DIR}}/private/gcp-credentials.yaml"
 
   get:urls:
     deps:
-      - task: kubeconfig:set-context:aks
+      - task: kubeconfig:set-context:gke
     cmd: >-
       kubectl get ingress -A -o yaml | yq '.items[] | {(.metadata.name): ((select(.spec.tls != null) | "https://" // "http://") + .spec.rules[].host + .spec.rules[].http.paths[].path)}'
 
-  kubeconfig:set-context:aks:
+  kubeconfig:set-context:gke:
     deps:
-      - task: kubeconfig:update:aks
+      - task: kubeconfig:update:gke
     cmd: kubectl config set-context "$(yq '.cluster_name' {{.CONFIG_FILE}})"
 
   kubeconfig:set-context:kind:
@@ -80,31 +79,31 @@ tasks:
       - task: kubeconfig:update:kind
     cmd: kubectl config set-context $(yq '.name' "{{.ROOT_DIR}}/kind.yaml")
 
-  kubeconfig:update:aks:
+  kubeconfig:update:gke:
     deps:
-      - task: azure:init
-    cmd: az aks get-credentials --name "$(yq '.cluster_name' {{.CONFIG_FILE}})" --overwrite-existing {{.AZ_CLI_OPTS}}
+      - task: gcp:init
+    cmd: gcloud container clusters get-credentials "$(yq '.cluster_name' {{.CONFIG_FILE}})"
 
   kubeconfig:update:kind:
     cmd: kind export kubeconfig --quiet --name $(yq '.name' "{{.ROOT_DIR}}/kind.yaml")
 
-  azure:init:
+  gcp:init:
     deps:
       - task: config:lint
     silent: true
     cmds:
-      - cmd: az account set --subscription "$(yq '.subscription' {{.CONFIG_FILE}})"
-      - cmd: az config set defaults.location="$(yq '.location' {{.CONFIG_FILE}})" defaults.group="$(yq '.resource_group' {{.CONFIG_FILE}})" {{.AZ_CLI_OPTS}}
+      - cmd: gcloud config set project "$(yq '.project' {{.CONFIG_FILE}})"
+      - cmd: gcloud config set compute/region "$(yq '.region' {{.CONFIG_FILE}})"
 
   uninstall:
     deps:
-      - task: azure:init
+      - task: gcp:init
     ignore_error: true
     cmds:
       - defer: rm -f "{{.KUBECONFIG}}"
-      - task: kubeconfig:set-context:aks
-      - cmd: kubectl delete workloadidentities.azure.livewyer.io -A --all --interactive=false --now && sleep 60
-      - cmd: az identity delete --name crossplane {{.AZ_CLI_OPTS}}
+      - task: kubeconfig:set-context:gke
+      - cmd: kubectl delete workloadidentities.gcp.livewyer.io -A --all --interactive=false --now && sleep 60
+      - cmd: gcloud iam service-accounts delete crossplane
       - cmd: kubectl delete pkg.crossplane.io -A --all --interactive=false --now
       - cmd: kubectl -n argocd delete appset $(yq '. | keys - ["argocd"] | .[]' ${REPO_ROOT}/packages/addons/values.yaml) --interactive=false --now
       - cmd: kubectl -n argocd delete app $(kubectl -n argocd get app -o yaml | yq '.items[] | select(.metadata.labels.addonName!="argocd").metadata.name') --interactive=false --now
@@ -116,7 +115,7 @@ tasks:
   kind:create:
     cmd: kind create cluster --config "{{.ROOT_DIR}}/kind.yaml"
   kind:delete:
-    cmd: kind delete cluster --name $(yq '.name' "{{.ROOT_DIR}}/kind.yaml"
+    cmd: kind delete cluster --name $(yq '.name' "{{.ROOT_DIR}}/kind.yaml")
 
   helmfile:init:
     cmd: helmfile init {{.CLI_ARGS}}

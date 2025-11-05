@@ -1,27 +1,24 @@
-### Config for CNOE Azure Reference Implementation ###
-# Source: "https://github.com/livewyer-ops/reference-implementation-azure"
+### Config for CNOE GCP Reference Implementation ###
+# Source: "https://github.com/livewyer-ops/reference-implementation-google"
 
 # Details of your repository hosting the reference azure implementation code
 repo:
-  url: "https://github.com/<REPLACE_ME_your_org>/reference-implementation-azure"
+  url: "https://github.com/<REPLACE_ME_your_org>/reference-implementation-google"
   revision: "main" # Branch or Tag which should be used for Argo CD Apps
   basepath: "packages" # Directory in which configuration of addons is stored
 
-# The name of the AKS cluster you are installing the reference implementation on.
+# The name of the GKE cluster you are installing the reference implementation on.
 cluster_name: "cnoe-ref-impl"
-# Azure Region of the AKS cluster and cnoe-reference-implementation-azure config secret
-subscription: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
-location: eastus
-resource_group: cnoe-idp
-
-# AKS cluster OIDC issuer URL
-cluster_oidc_issuer_url: https://eastus.oic.prod-aks.azure.com/00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111/
+# GCP Region of the GKE cluster and cnoe-reference-implementation-google config secret
+project: cnoe-idp
+region: us-east1
 
 # Base Domain name used for exposing services. It should be a subdomain or main domain of the DNS zone.
-domain: <REPLACE_ME_example.com>
+dns_zone: <REPLACE_ME_cnoe-dns>
+dns_domain: <REPLACE_ME_example.com>
 
-# Azure Key Vault to use to store config secrets and certs
-keyvault: cnoe-ref-impl
+# GCP Secret Manager to use to store config secrets and certs
+secret_manager: cnoe-ref-impl
 
 # Set this to "true" if you want to enable path routing othewise "false" for domain based routing.
 # When enabled, the exposed addons will be accessible at https://<domain_name>/<addon-name>
@@ -44,13 +41,12 @@ github:
 
 letsencrypt_env: prod
 
-# Tags for Azure resources
+# Tags for GCP resources
 tags:
   githubRepo: "github.com/<REPLACE_ME_your_org>/reference-implementation-azure"
   env: "dev"
   project: "cnoe"
 
 crossplane_workload_identity:
-  create: true
   clientId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
   tenantId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>

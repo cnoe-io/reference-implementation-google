@@ -1,11 +1,10 @@
 provider:
   packages:
-    - xpkg.upbound.io/upbound/provider-family-azure:v2.0.0
-    - xpkg.upbound.io/upbound/provider-azure-authorization:v2.0.0
-    - xpkg.upbound.io/upbound/provider-azure-managedidentity:v2.0.0
-    - xpkg.upbound.io/upbound/provider-azure-network:v2.0.0
-    - xpkg.upbound.io/upbound/provider-azure-keyvault:v2.0.0
-    - xpkg.upbound.io/upbound/provider-azure-containerservice:v2.0.0
+    - xpkg.upbound.io/upbound/provider-family-gcp:v2.2.0
+    - xpkg.upbound.io/upbound/provider-gcp-cloudplatform:v2.2.0
+    - xpkg.upbound.io/upbound/provider-gcp-container:v2.2.0
+    - xpkg.upbound.io/upbound/provider-gcp-dns:v2.2.0
+    - xpkg.upbound.io/upbound/provider-gcp-secretmanager:v2.2.0
     - xpkg.upbound.io/upbound/provider-kubernetes:v1
 
 function:
@@ -15,7 +14,7 @@ function:
 
 configuration:
   packages:
-    - xpkg.upbound.io/livewyer-ops/crossplane-configuration-azure-workload-identity:v0.0.2
+    - xpkg.upbound.io/livewyer-ops/crossplane-configuration-gcp-workload-identity:v0.0.1
 
 webui:
   enabled: true

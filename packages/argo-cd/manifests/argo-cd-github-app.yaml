@@ -10,7 +10,7 @@ metadata:
 spec:
   refreshInterval: "15m"
   secretStoreRef:
-    name: azure-keyvault
+    name: gcp-secretmanager
     kind: ClusterSecretStore
   target:
     name: github-app-org

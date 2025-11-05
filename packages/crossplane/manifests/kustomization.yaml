@@ -4,9 +4,8 @@ kind: Kustomization
 
 resources:
   - provider-kubernetes-config.yaml
-  - runtime-config.yaml
+  - provider-config.yaml
   - providers.yaml
-  - externaldns-secret.yaml
 
 patches:
   - patch: |-
@@ -18,7 +17,7 @@ patches:
       group: pkg.crossplane.io
       version: v1
       kind: Provider
-      name: upbound-provider-family-azure
+      name: upbound-provider-family-gcp
   - patch: |-
       - op: add
         path: /spec/runtimeConfigRef
@@ -28,14 +27,4 @@ patches:
       group: pkg.crossplane.io
       version: v1
       kind: Provider
-      name: upbound-provider-azure-authorization
-  - patch: |-
-      - op: add
-        path: /spec/runtimeConfigRef
-        value:
-          name: workload-identity
-    target:
-      group: pkg.crossplane.io
-      version: v1
-      kind: Provider
-      name: upbound-provider-azure-managedidentity
+      name: upbound-provider-gcp-cloudplatform

@@ -1,5 +1,5 @@
 {{- $config := (readFile "../../config.yaml") | fromYaml -}}
-{{- $credentials :=  (readFile "../../private/azure-credentials.json") | fromJson -}}
+{{- $credentials :=  (readFile "../../private/gcp-credentials.json") | fromJson -}}
 
 dex:
   enabled: false
@@ -11,7 +11,7 @@ configs:
 server:
   ingress:
     enabled: true
-    hostname: argocd.local.{{ $config.domain }}
+    hostname: argocd.local.{{ $config.dns_domain }}
 
 extraObjects:
 
@@ -28,14 +28,12 @@ extraObjects:
         addonsRepoURL: {{ $config.repo.url }}
         addonsRepoRevision: {{ $config.repo.revision }}
         addonsRepoBasepath: {{ $config.repo.basepath }}
-        subscription: {{ $config.subscription }}
-        location: {{ $config.location }}
-        resourceGroup: {{ $config.resource_group }}
-        tenantId: {{ $config.tenant_id }}
+        project: {{ $config.project }}
+        region: {{ $config.region }}
         clusterName: {{ $config.cluster_name }}
-        clusterOIDCIssuerURL: {{ $config.cluster_oidc_issuer_url }}
-        domain: {{ $config.domain }}
-        keyvault: {{$config.keyvault}}
+        dnsZone: {{ $config.dns_zone }}
+        dnsDomain: {{ $config.dns_domain }}
+        secretManager: {{$config.secret_manager}}
         pathRouting: "{{ $config.path_routing }}"
         environment: "control-plane"
         letsencryptEnv: "{{ $config.letsencrypt_env }}"
@@ -85,11 +83,10 @@ extraObjects:
     kind: Secret
     type: Opaque
     metadata:
-      name: provider-azure
+      name: provider-gcp
       namespace: crossplane-system
     stringData:
       credentials: |
         {{ $credentials | toJson }}
-      clientId: {{ $credentials.clientId }}
-      clientSecret: {{ $credentials.clientSecret }}
-      tenantId: {{ $credentials.tenantId }}
+      projectId: {{ $credentials.project_id }}
+      clientEmail: {{ $credentials.client_email }}

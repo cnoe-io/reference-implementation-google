@@ -6,7 +6,7 @@ metadata:
 spec:
   refreshInterval: 5m
   secretStoreRefs:
-    - name: azure-keyvault
+    - name: gcp-secretmanager
       kind: ClusterSecretStore
   selector:
     secret:

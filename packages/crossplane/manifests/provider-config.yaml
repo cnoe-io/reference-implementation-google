@@ -1,9 +1,9 @@
 apiVersion: kubernetes.m.crossplane.io/v1alpha1
 kind: ClusterProviderConfig
 metadata:
+  name: default
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-  name: default
 spec:
   credentials:
     source: InjectedIdentity
