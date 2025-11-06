@@ -272,22 +272,6 @@ crossplane:
             type: A
             managedZone: "{{ .metadata.annotations.dnsZone }}"
 
-      - apiVersion: secretmanager.gcp.m.upbound.io/v1beta1
-        kind: Secret
-        metadata:
-          annotations:
-            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-            cnoe.io/secret-manager: "{{ .metadata.annotations.secretManager }}"
-          labels:
-            cnoe.io/secret-manager: "{{ .metadata.annotations.secretManager }}"
-          name: "{{ .metadata.annotations.secretManager }}"
-        spec:
-          managementPolicies: ["Observe", "Update", "Create"]
-          forProvider:
-            secretId: config
-            tags:
-              managed-by: external-secrets
-
       - apiVersion: gcp.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:

@@ -49,18 +49,14 @@ spec:
           addonsRepoURL: "{{ (fromJson .config).repo.url }}"
           addonsRepoRevision: "{{ (fromJson .config).repo.revision }}"
           addonsRepoBasepath: "{{ (fromJson .config).repo.basepath }}"
-          subscription: "{{ (fromJson .config).subscription }}"
-          location: "{{ (fromJson .config).location }}"
-          resourceGroup: "{{ (fromJson .config).resource_group }}"
-          tenantId: "{{ (fromJson .config).tenant_id }}"
+          project: "{{ (fromJson .config).project }}"
+          region: "{{ (fromJson .config).region }}"
           clusterName: "{{ (fromJson .config).cluster_name }}"
-          clusterOIDCIssuerURL: "{{ (fromJson .config).cluster_oidc_issuer_url }}"
-          domain: "{{ (fromJson .config).domain }}"
-          keyvault: "{{(fromJson .config).keyvault}}"
+          dnsZone: "{{ (fromJson .config).dns_zone }}"
+          dnsDomain: "{{ (fromJson .config).dns_domain }}"
+          secretManager: "{{ (fromJson .config).secret_manager }}"
           letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
           pathRouting: "{{ (fromJson .config).path_routing }}"
-          crossplaneClientId: "{{ (fromJson .crossplane_sa).clientId }}"
-          crossplaneTenantId: "{{ (fromJson .crossplane_sa).tenantId }}"
           githubOrgUrl: "{{ (fromJson .config).github.orgURL }}"
           githubAppID: "{{ (fromJson .config).github.appId }}"
           githubAppInstallationID: "{{ (fromJson .config).github.installationId }}"
@@ -72,47 +68,17 @@ spec:
             {{ (fromJson .config).github.privateKey }}
       data:
         name: cnoe
-        server: "{{ .serverUrl }}"
+        server: "{{ (first (fromYaml .kubeconfig).clusters).cluster.server }}"
         config: |
           {{ toJson (dict
-            "kubeconfig" (.kubeconfig | fromYaml)
+            "kubeconfig" (fromYaml .kubeconfig)
             "tlsClientConfig" (dict
               "insecure" false
-              "caData" (b64enc .caData)
-              "certData" (b64enc .certData)
-              "keyData" (b64enc .keyData)
-              "serverName" (regexReplaceAll ":[0-9]+$" (urlParse .serverUrl).host "")
+              "caData" (b64enc (get (first (fromYaml .kubeconfig).clusters).cluster "certificate-authority-data"))
+              "serverName" (regexReplaceAll ":[0-9]+$" (urlParse (first (fromYaml .kubeconfig).clusters).cluster.server).host "")
             )
           ) }}
   data:
-    - secretKey: serverUrl
-      remoteRef:
-        conversionStrategy: Default
-        decodingStrategy: Auto
-        metadataPolicy: None
-        key: cnoe-kubeconfig
-        property: "attribute.kube_config.0.host"
-    - secretKey: caData
-      remoteRef:
-        conversionStrategy: Default
-        decodingStrategy: Auto
-        metadataPolicy: None
-        key: cnoe-kubeconfig
-        property: "kubeconfig.clustercacertificate"
-    - secretKey: certData
-      remoteRef:
-        conversionStrategy: Default
-        decodingStrategy: Auto
-        metadataPolicy: None
-        key: cnoe-kubeconfig
-        property: "kubeconfig.clientcertificate"
-    - secretKey: keyData
-      remoteRef:
-        conversionStrategy: Default
-        decodingStrategy: Auto
-        metadataPolicy: None
-        key: cnoe-kubeconfig
-        property: "kubeconfig.clientkey"
     - secretKey: kubeconfig
       remoteRef:
         conversionStrategy: Default
@@ -127,10 +93,3 @@ spec:
         metadataPolicy: None
         key: cnoe-config
         property: "config.json"
-    - secretKey: crossplane_sa
-      remoteRef:
-        conversionStrategy: Default
-        decodingStrategy: Auto
-        metadataPolicy: None
-        key: crossplane-sa
-        property: credentials

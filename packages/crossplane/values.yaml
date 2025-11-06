@@ -14,7 +14,7 @@ function:
 
 configuration:
   packages:
-    - xpkg.upbound.io/livewyer-ops/crossplane-configuration-gcp-workload-identity:v0.0.1
+    - xpkg.upbound.io/livewyer-ops/crossplane-configuration-gcp-workload-identity:v0.0.2
 
 webui:
   enabled: true

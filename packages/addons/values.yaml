@@ -56,7 +56,7 @@ crossplane:
           serviceAccountTemplate:
             metadata:
               annotations:
-                iam.gke.io/gcp-service-account: "{{ .metadata.annotations.crossplaneServiceAccountEmail }}"
+                iam.gke.io/gcp-service-account: "crossplane@{{ .metadata.annotations.project }}.iam.gserviceaccount.com"
               name: crossplane
       - apiVersion: gcp.m.upbound.io/v1beta1
         kind: ClusterProviderConfig
