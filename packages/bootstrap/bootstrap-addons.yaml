@@ -34,6 +34,24 @@ argocd-local:
     configs:
       params:
         server.insecure: true
+    server:
+      serviceAccount:
+        annotations:
+          iam.gke.io/gcp-service-account: "{{ .metadata.annotations.gcpServiceAccount }}"
+          iam.gke.io/return-principal-id-as-email: "true"
+    controller:
+      serviceAccount:
+        annotations:
+          iam.gke.io/gcp-service-account: "{{ .metadata.annotations.gcpServiceAccount }}"
+          iam.gke.io/return-principal-id-as-email: "true"
+      volumeMounts:
+        - name: gcp-serviceaccount
+          readOnly: true
+          mountPath: "/var/run/secrets/gcp"
+      volumes:
+        - name: gcp-serviceaccount
+          secret:
+            secretName: gcp-serviceaccount
   additionalResources:
     - manifestPath: ../bootstrap/manifests/argocd
       type: manifests
@@ -94,7 +112,6 @@ argocd:
             secretManager: "{{.metadata.annotations.secretManager}}"
             pathRouting: "{{ .metadata.annotations.pathRouting }}"
             letsencryptEnv: "{{ .metadata.annotations.letsencryptEnv }}"
-            crossplaneServiceAccountEmail: "{{ .metadata.annotations.crossplaneServiceAccountEmail }}"
         stringData:
           name: "{{ .metadata.annotations.clusterName }}"
           server: https://kubernetes.default.svc

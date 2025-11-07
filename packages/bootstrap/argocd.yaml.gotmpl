@@ -37,6 +37,7 @@ extraObjects:
         pathRouting: "{{ $config.path_routing }}"
         environment: "control-plane"
         letsencryptEnv: "{{ $config.letsencrypt_env }}"
+        gcpServiceAccount: "{{ $credentials.client_email }}"
     stringData:
       name: "{{ $config.cluster_name }}-bootstrap"
       server: https://kubernetes.default.svc
@@ -63,6 +64,15 @@ extraObjects:
       {{ end -}}
       githubAppPrivateKey: |
         {{ $config.github.privateKey | nindent 8 }}
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: gcp-serviceaccount
+    stringData:
+      credentials.json: |
+        {{ $credentials | toJson }}
 
   - apiVersion: v1
     kind: Namespace

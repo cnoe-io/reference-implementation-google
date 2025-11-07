@@ -74,8 +74,15 @@ spec:
             "kubeconfig" (fromYaml .kubeconfig)
             "tlsClientConfig" (dict
               "insecure" false
-              "caData" (b64enc (get (first (fromYaml .kubeconfig).clusters).cluster "certificate-authority-data"))
-              "serverName" (regexReplaceAll ":[0-9]+$" (urlParse (first (fromYaml .kubeconfig).clusters).cluster.server).host "")
+              "caData" (get (first (fromYaml .kubeconfig).clusters).cluster "certificate-authority-data")
+            )
+            "execProviderConfig" (dict
+              "apiVersion" "client.authentication.k8s.io/v1beta1"
+              "command" "argocd-k8s-auth"
+              "args" (list "gcp")
+              "env" (dict
+                "GOOGLE_APPLICATION_CREDENTIALS" "/var/run/secrets/gcp/credentials.json"
+              )
             )
           ) }}
   data:

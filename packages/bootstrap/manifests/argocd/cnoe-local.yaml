@@ -35,6 +35,7 @@ spec:
           letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
           pathRouting: "{{ (fromJson .config).path_routing }}"
           cnoeClusterUrl: "{{ (first (fromYaml .kubeconfig).clusters).cluster.server }}"
+          gcpServiceAccount: "{{ .gcpServiceAccount }}"
       data:
         name: "{{ (fromJson .config).cluster_name }}-bootstrap"
         server: https://kubernetes.default.svc
@@ -53,3 +54,10 @@ spec:
         metadataPolicy: None
         key: cnoe-kubeconfig
         property: kubeconfig
+    - secretKey: gcpServiceAccount
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: provider-gcp
+        property: clientEmail
