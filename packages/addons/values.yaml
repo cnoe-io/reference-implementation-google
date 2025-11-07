@@ -7,7 +7,7 @@ argocd:
   chartRepository: "https://argoproj.github.io/argo-helm"
   valuesObject:
     global:
-      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.dnsDomain }}{{ else }}argocd.{{ .metadata.annotations.dnsDomain }}{{ end }}'
+      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
     server:
       ingress:
         annotations:
@@ -17,7 +17,7 @@ argocd:
       cm:
         oidc.config: |
           name: Keycloak
-          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}/keycloak{{ end }}/realms/cnoe
+          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe
           clientID: argocd
           enablePKCEAuthentication: true
           requestedScopes:
@@ -75,12 +75,13 @@ crossplane:
           namespace: external-dns
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+          labels:
+            cnoe.io/cluster: "{{ .metadata.annotations.clusterName }}"
         spec:
           forProvider:
             projectId: "{{ .metadata.annotations.project }}"
             roles:
               - roles/dns.admin
-            serviceAccountName: external-dns
       - apiVersion: gcp.livewyer.io/v1alpha1
         kind: WorkloadIdentity
         metadata:
@@ -88,12 +89,13 @@ crossplane:
           namespace: external-secrets
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+          labels:
+            cnoe.io/cluster: "{{ .metadata.annotations.clusterName }}"
         spec:
           forProvider:
             projectId: "{{ .metadata.annotations.project }}"
             roles:
               - roles/secretmanager.admin
-            serviceAccountName: external-secrets-sa
   additionalResources:
     - manifestPath: "manifests"
       type: "manifests"
@@ -110,6 +112,11 @@ ingress-nginx:
   releaseName: ingress-nginx
   defaultVersion: "4.7.0"
   chartRepository: "https://kubernetes.github.io/ingress-nginx"
+  ignoreDifferences:
+    - group: apps
+      kind: "*"
+      jqPathExpressions:
+        - .spec.template.spec.containers[].resources
   selector:
     matchExpressions:
       - key: environment
@@ -127,7 +134,11 @@ external-dns:
     provider:
       name: google
     domainFilters:
-      - "{{ .metadata.annotations.dnsDomain }}"
+      - "{{ .metadata.annotations.domain }}"
+    serviceAccount:
+      create: true
+      annotations:
+        iam.gke.io/gcp-service-account: "external-dns@{{ .metadata.annotations.project }}.iam.gserviceaccount.com"
   selector:
     matchExpressions:
       - key: environment
@@ -141,10 +152,15 @@ external-secrets:
   defaultVersion: "0.17.0"
   chartRepository: "https://charts.external-secrets.io"
   valuesObject:
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: "external-secrets@{{ .metadata.annotations.project }}.iam.gserviceaccount.com"
     extraObjects:
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
         metadata:
+          annotations:
+            argocd.argoproj.io/sync-wave: "1"
           name: gcp-secretmanager
         spec:
           provider:
@@ -153,7 +169,7 @@ external-secrets:
               auth:
                 workloadIdentity:
                   serviceAccountRef:
-                    name: external-secrets-sa
+                    name: external-secrets
                     namespace: external-secrets
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
@@ -171,7 +187,25 @@ external-secrets:
                   key: ca.crt
               auth:
                 serviceAccount:
-                  name: external-secrets-sa
+                  name: external-secrets
+                  namespace: external-secrets
+      - apiVersion: external-secrets.io/v1
+        kind: ClusterSecretStore
+        metadata:
+          name: argocd
+        spec:
+          provider:
+            kubernetes:
+              remoteNamespace: argocd
+              server:
+                caProvider:
+                  type: ConfigMap
+                  name: kube-root-ca.crt
+                  namespace: keycloak
+                  key: ca.crt
+              auth:
+                serviceAccount:
+                  name: external-secrets
                   namespace: external-secrets
   selector:
     matchExpressions:
@@ -188,7 +222,7 @@ cert-manager:
   chartRepository: "https://charts.jetstack.io"
   valuesObject:
     global:
-      domainName: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.dnsDomain }}{{ end }}'
+      domainName: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ end }}'
       pathRouting: '{{ if eq .metadata.annotations.pathRouting "true" }}true{{ else }}false{{ end }}'
   selector:
     matchExpressions:
@@ -203,16 +237,32 @@ keycloak:
   releaseName: keycloak
   defaultVersion: "24.7.3"
   chartRepository: "https://charts.bitnami.com/bitnami"
+  ignoreDifferences:
+    - group: apps
+      kind: "*"
+      jqPathExpressions:
+        - .spec.template.spec.containers[].resources
+        - .spec.template.spec.initContainers[].resources
   valuesObject:
     httpRelativePath: '/{{ if eq .metadata.annotations.pathRouting "true" }}keycloak/{{ end }}'
     ingress:
-      hostname: '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}{{ end }}'
+      hostname: '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
       annotations:
         cert-manager.io/cluster-issuer: '{{ if eq .metadata.annotations.pathRouting "false" }}letsencrypt-{{ .metadata.annotations.letsencryptEnv }}{{ end }}'
       extraTls:
         - hosts:
-            - '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}{{ end }}'
+            - '{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'
           secretName: keycloak-server-tls
+    extraDeploy:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: keycloak-client-url
+        data:
+          KEYCLOAK_URL: 'http://keycloak.keycloak.svc.cluster.local{{ ternary "/keycloak" "" (eq (lower .metadata.annotations.pathRouting) "true") }}'
+          ARGO_CD_URL: '{{ if (eq (lower .metadata.annotations.pathRouting) "true") }}{{ .metadata.annotations.domain }}/argocd{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
+          BACKSTAGE_URL: '{{ if (eq (lower .metadata.annotations.pathRouting) "true") }}{{ .metadata.annotations.domain }}{{ else }}backstage.{{ .metadata.annotations.domain }}{{ end }}'
+          ARGO_WORKFLOW_URL: '{{ if (eq (lower .metadata.annotations.pathRouting) "true") }}{{ .metadata.annotations.domain }}/argo-workflows{{ else }}argo-workflows.{{ .metadata.annotations.domain }}{{ end }}'
   additionalResources:
     - manifestPath: "manifests"
       type: "manifests"
@@ -229,6 +279,11 @@ backstage:
   releaseName: backstage
   defaultVersion: "2.6.0"
   chartRepository: "https://backstage.github.io/charts"
+  ignoreDifferences:
+    - group: apps
+      kind: "*"
+      jqPathExpressions:
+        - .spec.template.spec.containers[].resources
   valuesObject:
     ingress:
       host: '{{ if eq .metadata.annotations.pathRouting "false" }}backstage.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}{{ end }}'

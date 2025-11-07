@@ -7,3 +7,4 @@ resources:
   - hub-cluster-secret.yaml
   - appproject-cnoe.yaml
   - appproject-demo.yaml
+  - auth-token.yaml

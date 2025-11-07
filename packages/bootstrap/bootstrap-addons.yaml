@@ -8,6 +8,9 @@ cnoe:
   defaultVersion: 0.1.0
   selectorMatchLabels:
     cnoe.io/cluster: cnoe
+  valueObject:
+    annotations:
+      argocd.argoproj.io/sync-wave: "1"
   valueFiles:
     - ../bootstrap/cnoe-addons.yaml
     - ../addons/values.yaml
@@ -30,7 +33,7 @@ argocd-local:
         - /metadata/labelsapp.kubernetes.io~1managed-by
   valuesObject:
     global:
-      domain: "argocd.local.{{ .metadata.annotations.dnsDomain }}"
+      domain: "argocd.local.{{ .metadata.annotations.domain }}"
     configs:
       params:
         server.insecure: true
@@ -68,7 +71,7 @@ argocd:
     cnoe.io/cluster: cnoe
   valuesObject:
     global:
-      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.dnsDomain }}{{ else }}argocd.{{ .metadata.annotations.dnsDomain }}{{ end }}'
+      domain: '{{ if eq .metadata.annotations.pathRouting "true" }}{{ .metadata.annotations.domain }}{{ else }}argocd.{{ .metadata.annotations.domain }}{{ end }}'
     server:
       ingress:
         annotations:
@@ -78,7 +81,7 @@ argocd:
       cm:
         oidc.config: |
           name: Keycloak
-          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.dnsDomain }}{{ else }}{{ .metadata.annotations.dnsDomain }}/keycloak{{ end }}/realms/cnoe
+          issuer: https://{{ if eq .metadata.annotations.pathRouting "false" }}keycloak.{{ .metadata.annotations.domain }}{{ else }}{{ .metadata.annotations.domain }}/keycloak{{ end }}/realms/cnoe
           clientID: argocd
           enablePKCEAuthentication: true
           requestedScopes:
@@ -108,7 +111,7 @@ argocd:
             region: "{{ .metadata.annotations.region }}"
             clusterName: "{{ .metadata.annotations.clusterName }}"
             dnsZone: "{{ .metadata.annotations.dnsZone }}"
-            dnsDomain: "{{ .metadata.annotations.dnsDomain }}"
+            domain: "{{ .metadata.annotations.domain }}"
             secretManager: "{{.metadata.annotations.secretManager}}"
             pathRouting: "{{ .metadata.annotations.pathRouting }}"
             letsencryptEnv: "{{ .metadata.annotations.letsencryptEnv }}"
@@ -189,8 +192,6 @@ external-secrets:
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
         metadata:
-          annotations:
-            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
           name: gcp-secretmanager
         spec:
           provider:
@@ -202,10 +203,25 @@ external-secrets:
                     name: provider-gcp
                     namespace: crossplane-system
                     key: credentials
-
-  additionalResources:
-    - manifestPath: ../bootstrap/manifests/external-secrets
-      type: manifests
+      - apiVersion: external-secrets.io/v1alpha1
+        kind: PushSecret
+        metadata:
+          name: cnoe-config
+          namespace: argocd
+        spec:
+          refreshInterval: 5m
+          secretStoreRefs:
+            - name: gcp-secretmanager
+              kind: ClusterSecretStore
+          selector:
+            secret:
+              name: cnoe-config
+          data:
+            - conversionStrategy: None
+              match:
+                secretKey: config.json
+                remoteRef:
+                  remoteKey: config
 
 crossplane:
   enabled: true
@@ -220,6 +236,8 @@ crossplane:
     - manifestPath: ../bootstrap/manifests/crossplane
       type: manifests
   valuesObject:
+    webui:
+      enabled: true
     extraObjects:
       - apiVersion: networking.k8s.io/v1
         kind: Ingress
@@ -227,7 +245,7 @@ crossplane:
           name: crossplane-dashboard
         spec:
           rules:
-            - host: "crossplane.local.{{ .metadata.annotations.dnsDomain }}"
+            - host: "crossplane.local.{{ .metadata.annotations.domain }}"
               http:
                 paths:
                   - path: /
@@ -237,6 +255,16 @@ crossplane:
                         name: webui
                         port:
                           number: 80
+
+      - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+        kind: ClusterProviderConfig
+        metadata:
+          annotations:
+            argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+          name: default
+        spec:
+          credentials:
+            source: InjectedIdentity
 
       - apiVersion: gcp.m.upbound.io/v1beta1
         kind: ClusterProviderConfig
@@ -262,6 +290,7 @@ crossplane:
           labels:
             cnoe.io/cluster: "{{ .metadata.annotations.clusterName }}"
           name: "{{ .metadata.annotations.clusterName }}"
+          namespace: argocd
         spec:
           managementPolicies: ["Observe"]
           writeConnectionSecretToRef:
@@ -275,14 +304,14 @@ crossplane:
           annotations:
             argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
             crossplane.io/external-name: "*.local"
-            cnoe.io/domain: "{{ .metadata.annotations.dnsDomain }}"
+            cnoe.io/domain: "{{ .metadata.annotations.domain }}"
           labels:
-            cnoe.io/domain: "{{ .metadata.annotations.dnsDomain }}"
+            cnoe.io/domain: "{{ .metadata.annotations.domain }}"
           name: cnoe-bootstrap
         spec:
           managementPolicies: ["Observe", "Update", "Create"]
           forProvider:
-            name: "*.local.{{ .metadata.annotations.dnsDomain }}."
+            name: "*.local.{{ .metadata.annotations.domain }}."
             rrdatas:
               - 127.0.0.1
             ttl: 3600

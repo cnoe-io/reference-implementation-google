@@ -12,7 +12,7 @@ proxyHeaders: "forwarded"
 global:
   security:
     allowInsecureImages: true
-  defaultStorageClass: default
+  defaultStorageClass: standard-rwo
 
 auth:
   adminUser: cnoe-admin
@@ -36,6 +36,7 @@ postgresql:
   global:
     security:
       allowInsecureImages: true
+    defaultStorageClass: standard-rwo
   auth:
     username: keycloak
     database: keycloak

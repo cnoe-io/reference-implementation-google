@@ -2,6 +2,3 @@ sources:
   - ingress
 txtOwnerId: cnoe-external-dns
 policy: sync
-serviceAccount:
-  create: false
-  name: external-dns

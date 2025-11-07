@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-token
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+spec:
+  template:
+    metadata:
+      generateName: auth-token
+    spec:
+      serviceAccountName: argocd-server
+      restartPolicy: Never
+      volumes:
+        - name: export
+          emptyDir:
+            sizeLimit: 10Mi
+      containers:
+        - name: auth-token
+          image: alpine/kubectl
+          envFrom:
+            - secretRef:
+                name: argocd-initial-admin-secret
+          volumeMounts:
+            - mountPath: /export
+              name: export
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              #! /bin/sh
+              set -e -o pipefail
+
+              trap 'catch $? $LINENO' ERR
+              catch() {
+                echo "FAILED: Error $1 occurred at line $2"
+              }
+
+              curl -LfsSk -H "Content-Type: application/json" -o /export/argocd-auth-token.json -d "{\"username\":\"admin\",\"password\":\"${password}\"}" http://argocd-server.argocd.svc.cluster.local:443/api/v1/session
+              kubectl -n argocd create secret generic admin-auth-token --from-file=token=/export/argocd-auth-token.json \
+                && echo "INFO: secret argocd/admin-auth-token created" || echo "WARN: secret argocd/admin-auth-token already exists?"

@@ -1,0 +1,255 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-init-config
+  namespace: keycloak
+data:
+  client-scopes-groups.json: |
+    {
+      "name": "groups",
+      "description": "groups a user belongs to",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "gui.order": "",
+        "consent.screen.text": "Access to groups a user belongs to."
+      },
+      "protocolMappers": [{
+        "name": "groups",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-group-membership-mapper",
+        "consentRequired": false,
+        "config": {
+          "claim.name": "groups",
+          "full.path": "false",
+          "id.token.claim": "true",
+          "access.token.claim": "true",
+          "userinfo.token.claim": "true"
+        }
+      }]
+    }
+  groups-admin.json: |
+    {
+      "name": "admin",
+      "path": "/admin",
+      "subGroups": [],
+      "access": {
+        "view": true,
+        "viewMembers": true,
+        "manageMembers": true,
+        "manage": true,
+        "manageMembership": true
+      }
+    }
+  groups-base-user.json: |
+    {
+      "name": "base-user",
+      "path": "/base-user",
+      "subGroups": [],
+      "access": {
+        "view": true,
+        "viewMembers": true,
+        "manageMembers": true,
+        "manage": true,
+        "manageMembership": true
+      }
+    }
+  users-user1.json: |
+    {
+      "username": "user1",
+      "firstName": "user",
+      "lastName": "one",
+      "emailVerified": false,
+      "enabled": true,
+      "totp": false,
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "access": {
+        "manage": true
+      },
+      "credentials": [{
+        "type": "password",
+        "value": "${KEYCLOAK_USER_PASSWORD}",
+        "temporary": false
+      }]
+    }
+  users-user2.json: |
+    {
+      "username": "user2",
+      "firstName": "user",
+      "lastName": "two",
+      "emailVerified": false,
+      "enabled": true,
+      "totp": false,
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "access": {
+        "manage": true
+      },
+      "credentials":[{
+        "type": "password",
+        "value": "${KEYCLOAK_USER_PASSWORD}",
+        "temporary": false
+      }]
+    }
+  clients-argocd.json: |
+    {
+      "clientId": "argocd",
+      "name": "ArgoCD Client",
+      "description": "Used for ArgoCD SSO",
+      "rootUrl": "https://${ARGO_CD_URL}",
+      "adminUrl": "https://${ARGO_CD_URL}",
+      "baseUrl": "/applications",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "https://${ARGO_CD_URL}/auth/callback",
+        "https://${ARGO_CD_URL}/pkce/verify",
+        "http://localhost:8085/auth/callback"
+      ],
+      "webOrigins": [
+        "https://${ARGO_CD_URL}"
+      ],
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "publicClient": true,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "backchannel.logout.session.required": "true",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [ "web-origins", "acr", "roles", "profile", "groups", "basic", "email" ],
+      "optionalClientScopes": [ "address", "phone", "organization", "offline_access", "microprofile-jwt" ],
+      "access": {
+        "view": true,
+        "configure": true,
+        "manage": true
+      }
+    }
+  clients-backstage.json: |
+    {
+      "clientId": "backstage",
+      "name": "Backstage Client",
+      "description": "Used for Backstage SSO",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "https://${BACKSTAGE_URL}/api/auth/keycloak-oidc/handler/frame"
+      ],
+      "webOrigins": [
+        "https://${BACKSTAGE_URL}"
+      ],
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "backchannel.logout.session.required": "true",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [ "web-origins", "acr", "roles", "profile", "groups", "basic", "email" ],
+      "optionalClientScopes": [ "address", "phone", "organization", "offline_access", "microprofile-jwt" ],
+      "access": {
+        "view": true,
+        "configure": true,
+        "manage": true
+      }
+    }
+  clients-argo-workflows.json: |
+    {
+      "clientId": "argo-workflows",
+      "name": "Argo Workflows Client",
+      "description": "Used for Argo Workflows SSO",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "https://${ARGO_WORKFLOW_URL}/oauth2/callback"
+      ],
+      "webOrigins": [
+        "https://${ARGO_WORKFLOW_URL}"
+      ],
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "realm_client": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "backchannel.logout.session.required": "true",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [ "web-origins", "acr", "roles", "profile", "groups", "basic", "email" ],
+      "optionalClientScopes": [ "address", "phone", "organization", "offline_access", "microprofile-jwt" ],
+      "access": {
+        "view": true,
+        "configure": true,
+        "manage": true
+      }
+    }
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keycloak
+  namespace: keycloak
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["*"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keycloak
+  namespace: keycloak
+subjects:
+  - kind: ServiceAccount
+    name: keycloak
+    namespace: keycloak
+roleRef:
+  kind: Role
+  name: keycloak
+  apiGroup: rbac.authorization.k8s.io

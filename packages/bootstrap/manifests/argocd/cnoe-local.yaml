@@ -30,12 +30,11 @@ spec:
           region: "{{ (fromJson .config).region }}"
           clusterName: "{{ (fromJson .config).cluster_name }}"
           dnsZone: "{{ (fromJson .config).dns_zone }}"
-          dnsDomain: "{{ (fromJson .config).dns_domain }}"
+          domain: "{{ (fromJson .config).dns_domain }}"
           secretManager: "{{ (fromJson .config).secret_manager }}"
           letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
           pathRouting: "{{ (fromJson .config).path_routing }}"
           cnoeClusterUrl: "{{ (first (fromYaml .kubeconfig).clusters).cluster.server }}"
-          gcpServiceAccount: "{{ .gcpServiceAccount }}"
       data:
         name: "{{ (fromJson .config).cluster_name }}-bootstrap"
         server: https://kubernetes.default.svc
@@ -59,5 +58,5 @@ spec:
         conversionStrategy: Default
         decodingStrategy: Auto
         metadataPolicy: None
-        key: provider-gcp
+        key: cnoe-config
         property: clientEmail

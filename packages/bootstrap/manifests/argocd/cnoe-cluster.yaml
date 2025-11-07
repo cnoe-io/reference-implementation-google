@@ -3,22 +3,22 @@ kind: ClusterSecretStore
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "1"
   name: cnoe-kubeconfig
-  namespace: argocd
 spec:
   provider:
     kubernetes:
-      remoteNamespace: crossplane-system
+      remoteNamespace: argocd
       server:
         caProvider:
           type: ConfigMap
           name: kube-root-ca.crt
-          namespace: crossplane-system
+          namespace: argocd
           key: ca.crt
       auth:
         serviceAccount:
-          name: crossplane
-          namespace: crossplane-system
+          name: argocd-server
+          namespace: argocd
 
 ---
 apiVersion: external-secrets.io/v1
@@ -27,7 +27,6 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
   name: cnoe-kubeconfig
-  namespace: argocd
 spec:
   refreshInterval: 1m
   secretStoreRef:
@@ -53,7 +52,7 @@ spec:
           region: "{{ (fromJson .config).region }}"
           clusterName: "{{ (fromJson .config).cluster_name }}"
           dnsZone: "{{ (fromJson .config).dns_zone }}"
-          dnsDomain: "{{ (fromJson .config).dns_domain }}"
+          domain: "{{ (fromJson .config).dns_domain }}"
           secretManager: "{{ (fromJson .config).secret_manager }}"
           letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
           pathRouting: "{{ (fromJson .config).path_routing }}"

@@ -32,7 +32,7 @@ extraObjects:
         region: {{ $config.region }}
         clusterName: {{ $config.cluster_name }}
         dnsZone: {{ $config.dns_zone }}
-        dnsDomain: {{ $config.dns_domain }}
+        domain: {{ $config.dns_domain }}
         secretManager: {{$config.secret_manager}}
         pathRouting: "{{ $config.path_routing }}"
         environment: "control-plane"
@@ -69,6 +69,18 @@ extraObjects:
     kind: Secret
     type: Opaque
     metadata:
+      name: cnoe-config
+      namespace: argocd
+    stringData:
+      config.json: |
+        {{ $config | toJson }}
+      projectId: {{ $credentials.project_id }}
+      clientEmail: {{ $credentials.client_email }}
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
       name: gcp-serviceaccount
     stringData:
       credentials.json: |
@@ -83,20 +95,8 @@ extraObjects:
     kind: Secret
     type: Opaque
     metadata:
-      name: cnoe-config
-      namespace: crossplane-system
-    stringData:
-      config.json: |
-        {{ $config | toJson }}
-
-  - apiVersion: v1
-    kind: Secret
-    type: Opaque
-    metadata:
       name: provider-gcp
       namespace: crossplane-system
     stringData:
       credentials: |
         {{ $credentials | toJson }}
-      projectId: {{ $credentials.project_id }}
-      clientEmail: {{ $credentials.client_email }}

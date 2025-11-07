@@ -23,6 +23,8 @@ backstage:
       node packages/backend --config /app/app-config-from-configmap.yaml || /app/node_modules/.bin/knex migrate:unlock --connection "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST/backstage_plugin_app" --client pg
   extraEnvVarsSecrets:
     - backstage-env-vars
+    - keycloak-oidc
+    - argocd-admin
   extraVolumeMounts:
     - name: backstage-config
       mountPath: "/app/config"
@@ -132,6 +134,7 @@ postgresql:
   global:
     security:
       allowInsecureImages: true
+    defaultStorageClass: standard-rwo
   auth:
     username: "backstage"
     existingSecret: "backstage-env-vars"

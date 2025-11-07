@@ -2,6 +2,8 @@ apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: upbound-provider-family-gcp
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   package: xpkg.upbound.io/upbound/provider-family-gcp:v2.2.0
 
@@ -10,5 +12,7 @@ apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
   name: upbound-provider-gcp-cloudplatform
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   package: xpkg.upbound.io/upbound/provider-gcp-cloudplatform:v2.2.0
