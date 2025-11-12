@@ -222,6 +222,9 @@ external-secrets:
                 secretKey: config.json
                 remoteRef:
                   remoteKey: config
+  additionalResources:
+    - manifestPath: ../bootstrap/manifests/external-secrets
+      type: manifests
 
 crossplane:
   enabled: true

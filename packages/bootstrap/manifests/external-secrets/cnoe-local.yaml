@@ -4,6 +4,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
   name: cnoe-local
+  namespace: argocd
 spec:
   refreshInterval: 1m
   secretStoreRef:

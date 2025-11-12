@@ -3,6 +3,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - external-secrets.yaml
-  - k8s-config-secret.yaml
-  - argocd-auth-token.yaml
+  - cnoe-local.yaml
+  - cnoe-cluster.yaml

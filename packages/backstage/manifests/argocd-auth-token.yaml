@@ -3,8 +3,6 @@ kind: Job
 metadata:
   name: auth-token
   namespace: argocd
-  annotations:
-    argocd.argoproj.io/hook: PostSync
 spec:
   template:
     metadata:

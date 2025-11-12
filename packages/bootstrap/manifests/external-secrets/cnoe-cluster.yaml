@@ -3,7 +3,6 @@ kind: ClusterSecretStore
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-    argocd.argoproj.io/sync-wave: "1"
   name: cnoe-kubeconfig
 spec:
   provider:
@@ -27,6 +26,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
   name: cnoe-kubeconfig
+  namespace: argocd
 spec:
   refreshInterval: 1m
   secretStoreRef:
