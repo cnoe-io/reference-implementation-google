@@ -21,7 +21,7 @@ task kind:create   # Create local Kind cluster
 task kind:delete   # Delete local Kind cluster
 
 # Kubeconfig management:
-task kubeconfig:set-context:aks   # Set kubectl context to AKS cluster
+task kubeconfig:set-context:gke   # Set kubectl context to GKE cluster
 task kubeconfig:set-context:kind  # Set kubectl context to Kind cluster
 
 # Helmfile operations:
@@ -56,11 +56,11 @@ task diff          # Show pending changes
 task uninstall     # Clean removal of all resources
 ```
 
-**Utility Tasks** (interact with AKS cluster):
+**Utility Tasks** (interact with GKE cluster):
 
 ```bash
-task get:urls      # Get service URLs from target AKS cluster
-task kubeconfig:set-context:aks  # Switch to AKS cluster context
+task get:urls      # Get service URLs from target GKE cluster
+task kubeconfig:set-context:gke  # Switch to GKE cluster context
 ```
 
 **Configuration Tasks**:
@@ -80,12 +80,12 @@ Use `task sync` for updates after the initial installation, not `task install`.
 
 ## Configuration Requirements
 
-The installation requires two configuration files:
+The installation requires configuration files:
 
-1. **`config.yaml`** - Main configuration (copy from `config.yaml.template`)
-2. **`private/azure-credentials.json`** - Azure service principal credentials (copy from `private/azure-credentials.template.json`)
+1. **`config.yaml`** - Main configuration (copy from `config.template.yaml`)
+2. **GCP service account credentials** - Set up via gcloud CLI or service account key file
 
-Both files are validated automatically during `task init` and `task config:lint`.
+Configuration is validated automatically during `task init` and `task config:lint`.
 
 ## Monitoring Installation Progress
 
@@ -110,10 +110,10 @@ The Taskfile manages kubectl contexts automatically:
 # Switch to Kind cluster context (for monitoring bootstrap)
 task kubeconfig:set-context:kind
 
-# Switch to AKS cluster context (for accessing final services)
-task kubeconfig:set-context:aks
+# Switch to GKE cluster context (for accessing final services)
+task kubeconfig:set-context:gke
 
-# Get service URLs from AKS cluster
+# Get service URLs from GKE cluster
 task get:urls
 ```
 
@@ -173,7 +173,7 @@ Configuration validation happens automatically during:
 Validation includes:
 
 - `config.yaml` schema validation
-- `private/azure-credentials.json` format validation
+- GCP credentials validation
 - Required CLI tools availability check
 
 ## Bootstrap Architecture
@@ -181,8 +181,8 @@ Validation includes:
 The installation follows this flow:
 
 1. **Local Kind Cluster** - Bootstrap environment with ArgoCD and Crossplane
-2. **Azure Resource Creation** - Crossplane creates Key Vault and Workload Identity
-3. **AKS Deployment** - ArgoCD deploys CNOE components to target AKS cluster
+2. **GCP Resource Management** - Crossplane manages Secret Manager and Workload Identity
+3. **GKE Deployment** - ArgoCD deploys CNOE components to target GKE cluster
 4. **Cleanup** - Kind cluster can be removed after installation completes
 
 This approach provides better isolation and observability during the installation process.

@@ -1,9 +1,11 @@
 <!-- omit from toc -->
-# Demo Guide - CNOE Azure Reference Implementation
 
-This guide demonstrates the key features and capabilities of the CNOE Azure Reference Implementation through practical examples focused on Azure services and infrastructure.
+# Demo Guide - CNOE GCP Reference Implementation
+
+This guide demonstrates the key features and capabilities of the CNOE GCP Reference Implementation through practical examples focused on GCP services and infrastructure.
 
 <!-- omit from toc -->
+
 ## Best Practices Demonstrated
 
 ### 1. GitOps Workflow
@@ -14,10 +16,10 @@ This guide demonstrates the key features and capabilities of the CNOE Azure Refe
 
 ### 2. Security
 
-- Workload Identity for Azure authentication
+- Workload Identity for GCP authentication
 - Secret management with External Secrets
 - TLS everywhere with cert-manager
-- Configuration stored securely in Azure Key Vault
+- Configuration stored securely in GCP Secret Manager
 
 ### 3. Developer Experience
 
@@ -33,6 +35,7 @@ This guide demonstrates the key features and capabilities of the CNOE Azure Refe
 - Centralized configuration management
 
 <!-- omit from toc -->
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
@@ -51,7 +54,7 @@ This guide demonstrates the key features and capabilities of the CNOE Azure Refe
 ## Prerequisites
 
 - Complete installation following the instructions in the [README.md](../README.md) file
-- All prerequisite Azure resources (AKS cluster, DNS zone, Key Vault) are properly configured
+- All prerequisite GCP resources (GKE cluster, Cloud DNS zone, Secret Manager) are properly configured
 - Access to Backstage UI at your configured domain
 - Default user (`user1`) credentials from Keycloak
 
@@ -59,7 +62,7 @@ This guide demonstrates the key features and capabilities of the CNOE Azure Refe
 
 After you installed the platform, before performing any operations/scenarios we recommend you first explore the platform.
 
-This section will provide you with instructions on you can access the UI for each component for you to explore. 
+This section will provide you with instructions on you can access the UI for each component for you to explore.
 
 To begin the `task get:urls` command can be used to fetch all the URLs.
 
@@ -123,7 +126,7 @@ See the [Backstage Documentation](https://backstage.io/docs/) for more informati
 
 ### Scenario 1: Creating a New Application from Template
 
-@TODO creating templates for Azure is still to be completed [link to issue to be attached]
+@TODO creating templates for GCP is still to be completed [link to issue to be attached]
 
 ## Reading Material
 
@@ -134,7 +137,7 @@ Previously linked reading material and more:
 - [Argo Workflows Examples](https://github.com/argoproj/argo-workflows/tree/master/examples)
 - [Crossplane Documentation](https://docs.crossplane.io/)
 - [CNOE Project](https://cnoe.io/)
-- [Azure Workload Identity](https://azure.github.io/azure-workload-identity/)
+- [GCP Workload Identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
 
 ## Feedback and Contributions
 

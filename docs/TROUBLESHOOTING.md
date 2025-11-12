@@ -1,9 +1,8 @@
 <!-- omit from toc -->
 
-# Troubleshooting Guide - CNOE Azure Reference Implementation
+# Troubleshooting Guide - CNOE GCP Reference Implementation
 
-This
-guide covers common issues and their solutions when using the CNOE Azure Reference Implementation with its Kind cluster bootstrap approach.
+This guide covers common issues and their solutions when using the CNOE GCP Reference Implementation with its Kind cluster bootstrap approach.
 
 > Note: Most issues are related to missing prerequisites, authentication, networking, or resource constraints. Start with verifying prerequisites and work systematically through the troubleshooting steps.
 
@@ -15,12 +14,12 @@ guide covers common issues and their solutions when using the CNOE Azure Referen
   - [Task Installation Fails](#task-installation-fails)
   - [Kind Cluster Creation Issues](#kind-cluster-creation-issues)
   - [Helmfile Deployment Issues](#helmfile-deployment-issues)
-  - [Azure Credentials Issues](#azure-credentials-issues)
+  - [GCP Credentials Issues](#gcp-credentials-issues)
 - [Configuration Issues](#configuration-issues)
   - [Configuration File Validation](#configuration-file-validation)
   - [GitHub Integration Problems](#github-integration-problems)
   - [Domain and DNS Issues](#domain-and-dns-issues)
-  - [Azure Resource Creation Issues](#azure-resource-creation-issues)
+  - [GCP Resource Creation Issues](#gcp-resource-creation-issues)
 - [General Troubleshooting Approach](#general-troubleshooting-approach)
   - [1. Check Kind Cluster Status](#1-check-kind-cluster-status)
   - [2. Check ArgoCD Applications](#2-check-argocd-applications)
@@ -31,8 +30,8 @@ guide covers common issues and their solutions when using the CNOE Azure Referen
   - [Local ArgoCD Issues](#local-argocd-issues)
   - [Local Crossplane Issues](#local-crossplane-issues)
   - [Local DNS Issues](#local-dns-issues)
-- [Target AKS Cluster Issues](#target-aks-cluster-issues)
-  - [AKS Connection Issues](#aks-connection-issues)
+- [Target GKE Cluster Issues](#target-gke-cluster-issues)
+  - [GKE Connection Issues](#gke-connection-issues)
   - [Component Deployment Issues](#component-deployment-issues)
   - [Workload Identity Issues](#workload-identity-issues)
 - [Component-Specific Issues](#component-specific-issues)
@@ -73,35 +72,35 @@ guide covers common issues and their solutions when using the CNOE Azure Referen
 
 **Common Causes**:
 
-1. Missing prerequisite Azure resources (AKS cluster, DNS zone)
-2. Incorrect configuration in `config.yaml` or `private/azure-credentials.json`
-3. Azure CLI not authenticated
+1. Missing prerequisite GCP resources (GKE cluster, Cloud DNS zone, Secret Manager)
+2. Incorrect configuration in `config.yaml`
+3. gcloud CLI not authenticated
 4. Kind not installed or Docker not running
 5. Missing required tools
 
 **Debug Steps**:
 
 ```bash
-# Verify prerequisite Azure resources exist
-az aks show --name $(yq '.cluster_name' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
-az network dns zone show --name $(yq '.domain' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
+# Verify prerequisite GCP resources exist
+gcloud container clusters describe $(yq '.cluster_name' config.yaml) --region=$(yq '.region' config.yaml) --project=$(yq '.project' config.yaml)
+gcloud dns managed-zones describe $(yq '.dns_zone' config.yaml) --project=$(yq '.project' config.yaml)
+gcloud secrets describe $(yq '.secret_manager' config.yaml) --project=$(yq '.project' config.yaml) || echo "Secret Manager will be created"
 
 # Verify required tools
-which az kubectl yq helm helmfile task kind yamale
+which gcloud kubectl yq helm helmfile task kind yamale
 
 # Check Docker is running (required for Kind)
 docker info
 
-# Check Azure CLI login
-az account show
+# Check gcloud CLI authentication
+gcloud auth list
+gcloud config get-value project
 
 # Validate configuration files
 task config:lint
 
-# Check cluster OIDC issuer
-az aks show --name $(yq '.cluster_name' config.yaml) \
-  --resource-group $(yq '.resource_group' config.yaml) \
-  --query "oidcIssuerProfile.issuerUrl" -o tsv
+# Check cluster workload identity configuration
+gcloud container clusters describe $(yq '.cluster_name' config.yaml) --region=$(yq '.region' config.yaml) --format="value(workloadIdentityConfig)"
 ```
 
 ### Kind Cluster Creation Issues
@@ -166,35 +165,39 @@ helmfile --debug diff
 kubectl get nodes
 ```
 
-### Azure Credentials Issues
+### GCP Credentials Issues
 
-**Symptoms**: Crossplane cannot authenticate to Azure
+**Symptoms**: Crossplane cannot authenticate to GCP
 
 **Debug Steps**:
 
 ```bash
-# Validate Azure credentials file
-task config:lint
+# Validate GCP credentials
+gcloud auth application-default print-access-token
 
-# Check credentials format
-cat private/azure-credentials.json | yq '.'
+# Check current gcloud configuration
+gcloud config list
 
-# Test Azure authentication manually
-az login --service-principal \
-  --username $(yq '.clientId' private/azure-credentials.json) \
-  --password $(yq '.clientSecret' private/azure-credentials.json) \
-  --tenant $(yq '.tenantId' private/azure-credentials.json)
+# Check if service account has necessary permissions
+gcloud projects get-iam-policy $(yq '.project' config.yaml) \
+  --flatten="bindings[].members" \
+  --format="table(bindings.role)" \
+  --filter="bindings.members:serviceAccount:*"
 
 # Check if credentials are loaded in Crossplane
-kubectl get secret provider-azure -n crossplane-system -o yaml
+kubectl get secret -n crossplane-system
+kubectl get providerconfig -n crossplane-system
 ```
 
 **Common Fixes**:
 
 ```bash
-# Recreate credentials file from template
-cp private/azure-credentials.template.json private/azure-credentials.json
-# Edit with your actual credentials
+# Re-authenticate gcloud
+gcloud auth login
+gcloud auth application-default login
+
+# Set the correct project
+gcloud config set project $(yq '.project' config.yaml)
 
 # Restart Crossplane provider
 kubectl rollout restart deployment/crossplane -n crossplane-system
@@ -253,10 +256,10 @@ nslookup argocd.local.YOUR_DOMAIN
 nslookup crossplane.local.YOUR_DOMAIN
 
 # Check if local DNS record was created
-az network dns record-set a show \
-  --name "*.local" \
-  --zone-name $(yq '.domain' config.yaml) \
-  --resource-group $(yq '.resource_group' config.yaml)
+gcloud dns record-sets list \
+  --zone=$(yq '.dns_zone' config.yaml) \
+  --filter="name:*.local.$(yq '.dns_domain' config.yaml)" \
+  --project=$(yq '.project' config.yaml)
 
 # Check ingress configuration in Kind cluster
 task kubeconfig:set-context:kind
@@ -266,9 +269,9 @@ kubectl get ingress -A
 curl -H "Host: argocd.local.YOUR_DOMAIN" http://localhost
 ```
 
-### Azure Resource Creation Issues
+### GCP Resource Creation Issues
 
-**Symptoms**: Crossplane fails to create Azure resources (Key Vault, Workload Identity)
+**Symptoms**: Crossplane fails to create or manage GCP resources (Secret Manager, Workload Identity)
 
 **Debug Steps**:
 
@@ -279,18 +282,20 @@ task kubeconfig:set-context:kind
 # Check Crossplane logs
 kubectl logs -n crossplane-system deployment/crossplane
 
-# Check Azure provider status
+# Check GCP provider status
 kubectl get providers
 
 # Check managed resources
 kubectl get managed -A
 
 # Check specific resources
-kubectl get vault -A
-kubectl get workloadidentity -A
+kubectl get secret -A
+kubectl get serviceaccount -A
 
-# Check Azure RBAC permissions
-az role assignment list --assignee $(yq '.clientId' private/azure-credentials.json)
+# Check GCP IAM permissions
+gcloud projects get-iam-policy $(yq '.project' config.yaml) \
+  --flatten="bindings[].members" \
+  --format="table(bindings.role,bindings.members)"
 ```
 
 ## General Troubleshooting Approach
@@ -432,43 +437,44 @@ kubectl logs -n crossplane-system -l pkg.crossplane.io/provider=azure
 
 ```bash
 # Check if DNS record was created by Crossplane
-kubectl get dnsarecord -A
+kubectl get managed -A | grep -i dns
 
-# Check DNS record in Azure
-az network dns record-set a show \
-  --name "*.local" \
-  --zone-name $(yq '.domain' config.yaml) \
-  --resource-group $(yq '.resource_group' config.yaml)
+# Check DNS record in GCP
+gcloud dns record-sets list \
+  --zone=$(yq '.dns_zone' config.yaml) \
+  --filter="name:*.local.$(yq '.dns_domain' config.yaml)" \
+  --project=$(yq '.project' config.yaml)
 
 # Check external-dns logs (if applicable)
 kubectl logs -n external-dns deployment/external-dns
 ```
 
-## Target AKS Cluster Issues
+## Target GKE Cluster Issues
 
-### AKS Connection Issues
+### GKE Connection Issues
 
-**Symptoms**: Cannot connect to or deploy to AKS cluster
+**Symptoms**: Cannot connect to or deploy to GKE cluster
 
 **Debug Steps**:
 
 ```bash
-# Verify AKS cluster credentials
-task kubeconfig:set-context:aks
+# Verify GKE cluster credentials
+task kubeconfig:set-context:gke
 kubectl cluster-info
 
 # Check if cluster is accessible
 kubectl get nodes
 
-# Verify OIDC issuer configuration
-az aks show --name $(yq '.cluster_name' config.yaml) \
-  --resource-group $(yq '.resource_group' config.yaml) \
-  --query "oidcIssuerProfile.issuerUrl" -o tsv
+# Verify Workload Identity configuration
+gcloud container clusters describe $(yq '.cluster_name' config.yaml) \
+  --region=$(yq '.region' config.yaml) \
+  --project=$(yq '.project' config.yaml) \
+  --format="value(workloadIdentityConfig)"
 ```
 
 ### Component Deployment Issues
 
-**Symptoms**: Components not deploying to AKS cluster from Kind-based ArgoCD
+**Symptoms**: Components not deploying to GKE cluster from Kind-based ArgoCD
 
 **Debug Steps**:
 
@@ -477,7 +483,7 @@ az aks show --name $(yq '.cluster_name' config.yaml) \
 task kubeconfig:set-context:kind
 kubectl get applications -n argocd
 
-# Check if ArgoCD can reach AKS cluster
+# Check if ArgoCD can reach GKE cluster
 kubectl get secret cnoe -n argocd -o yaml
 
 # Check logs for deployment issues
@@ -486,24 +492,24 @@ kubectl logs -n argocd deployment/argocd-application-controller
 
 ### Workload Identity Issues
 
-**Symptoms**: Services on AKS cannot authenticate to Azure
+**Symptoms**: Services on GKE cannot authenticate to GCP
 
 **Debug Steps**:
 
 ```bash
-# Switch to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check if workload identity was created
-az identity list --resource-group $(yq '.resource_group' config.yaml)
+gcloud iam service-accounts list --project=$(yq '.project' config.yaml)
 
 # Check service account annotations
-kubectl get sa -A -o yaml | grep azure.workload.identity
+kubectl get sa -A -o yaml | grep iam.gke.io/gcp-service-account
 
-# Check federated credentials
-az identity federated-credential list \
-  --name crossplane \
-  --resource-group $(yq '.resource_group' config.yaml)
+# Check IAM bindings for workload identity
+gcloud iam service-accounts get-iam-policy \
+  crossplane@$(yq '.project' config.yaml).iam.gserviceaccount.com \
+  --project=$(yq '.project' config.yaml)
 ```
 
 ## Component-Specific Issues
@@ -512,13 +518,13 @@ az identity federated-credential list \
 
 #### ArgoCD Not Accessible
 
-**Symptoms**: Cannot access ArgoCD UI on AKS cluster
+**Symptoms**: Cannot access ArgoCD UI on GKE cluster
 
 **Debug Steps**:
 
 ```bash
-# Switch to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check ArgoCD deployment
 kubectl get pods -n argocd
@@ -572,9 +578,9 @@ kubectl get providerconfigs
 kubectl get secret provider-azure -n crossplane-system -o yaml
 ```
 
-#### Azure Resource Creation Failures
+#### GCP Resource Creation Failures
 
-**Symptoms**: Azure resources (Key Vault, Workload Identity) not being created
+**Symptoms**: GCP resources (Secret Manager, Workload Identity) not being created
 
 **Debug Steps**:
 
@@ -583,33 +589,41 @@ kubectl get secret provider-azure -n crossplane-system -o yaml
 kubectl get managed -A
 
 # Check specific resource events
-kubectl describe vault VAULT_NAME
-kubectl describe workloadidentity IDENTITY_NAME
+kubectl describe secret SECRET_NAME -n crossplane-system
+kubectl describe serviceaccount SA_NAME -n crossplane-system
 
-# Check Azure permissions
-az role assignment list --assignee $(yq '.clientId' private/azure-credentials.json)
+# Check GCP permissions
+gcloud projects get-iam-policy $(yq '.project' config.yaml) \
+  --flatten="bindings[].members" \
+  --format="table(bindings.role,bindings.members)"
 ```
 
 ### ExternalDNS Issues
 
 #### DNS Records Not Created
 
-**Symptoms**: DNS records are not automatically created on AKS cluster
+**Symptoms**: DNS records are not automatically created on GKE cluster
 
 **Debug Steps**:
 
 ```bash
-# Switch to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check external-dns logs
 kubectl logs -n external-dns deployment/external-dns
 
 # Check DNS zone permissions
-az role assignment list --scope "/subscriptions/$(yq '.subscription' config.yaml)/resourceGroups/$(yq '.resource_group' config.yaml)/providers/Microsoft.Network/dnszones/$(yq '.domain' config.yaml)"
+gcloud dns managed-zones describe $(yq '.dns_zone' config.yaml) \
+  --project=$(yq '.project' config.yaml)
 
-# Verify DNS zone exists
-az network dns zone show --name $(yq '.domain' config.yaml) --resource-group $(yq '.resource_group' config.yaml)
+# List current DNS records
+gcloud dns record-sets list \
+  --zone=$(yq '.dns_zone' config.yaml) \
+  --project=$(yq '.project' config.yaml)
+
+# Check service account permissions for external-dns
+kubectl get sa -n external-dns -o yaml
 ```
 
 ### Cert-Manager Issues
@@ -621,9 +635,8 @@ az network dns zone show --name $(yq '.domain' config.yaml) --resource-group $(y
 **Debug Steps**:
 
 ```bash
-# Switch
- to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check certificate status
 kubectl get certificates -A
@@ -645,13 +658,13 @@ kubectl logs -n cert-manager deployment/cert-manager
 
 #### Keycloak Pod Failing
 
-**Symptoms**: Keycloak pods crash or fail to start on AKS cluster
+**Symptoms**: Keycloak pods crash or fail to start on GKE cluster
 
 **Debug Steps**:
 
 ```bash
-# Switch to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check pod status
 kubectl get pods -n keycloak
@@ -687,13 +700,13 @@ kubectl get configmap -n backstage backstage-config -o yaml
 
 #### Backstage Pod Crashing
 
-**Symptoms**: Backstage pods fail to start on AKS cluster
+**Symptoms**: Backstage pods fail to start on GKE cluster
 
 **Debug Steps**:
 
 ```bash
-# Switch to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check pod logs
 kubectl logs -n backstage deployment/backstage
@@ -712,13 +725,13 @@ yq '.github' config.yaml
 
 #### Load Balancer Not Created
 
-**Symptoms**: ingress-nginx service has no external IP on AKS cluster
+**Symptoms**: ingress-nginx service has no external IP on GKE cluster
 
 **Debug Steps**:
 
 ```bash
-# Switch to AKS context
-task kubeconfig:set-context:aks
+# Switch to GKE context
+task kubeconfig:set-context:gke
 
 # Check service status
 kubectl get svc -n ingress-nginx
@@ -726,8 +739,9 @@ kubectl get svc -n ingress-nginx
 # Check ingress-nginx logs
 kubectl logs -n ingress-nginx deployment/ingress-nginx-controller
 
-# Check Azure Load Balancer
-az network lb list --resource-group MC_$(yq '.resource_group' config.yaml)_$(yq '.cluster_name' config.yaml)_$(yq '.location' config.yaml)
+# Check GCP Load Balancer
+gcloud compute forwarding-rules list --project=$(yq '.project' config.yaml)
+gcloud compute backend-services list --project=$(yq '.project' config.yaml)
 ```
 
 ## Performance Issues
@@ -741,7 +755,7 @@ az network lb list --resource-group MC_$(yq '.resource_group' config.yaml)_$(yq 
 1. DNS propagation delays
 2. Certificate issuance delays
 3. Image pull issues
-4. Resource constraints on Kind cluster or AKS
+4. Resource constraints on Kind cluster or GKE
 
 **Debug Steps**:
 
@@ -751,8 +765,8 @@ task kubeconfig:set-context:kind
 kubectl top nodes
 kubectl top pods -A
 
-# Check AKS cluster resources
-task kubeconfig:set-context:aks
+# Check GKE cluster resources
+task kubeconfig:set-context:gke
 kubectl top nodes
 
 # Check image pull status
@@ -789,7 +803,7 @@ kubectl get pv
 task uninstall
 task install
 
-# Reinstall only AKS components (keep Kind cluster)
+# Reinstall only GKE components (keep Kind cluster)
 task kubeconfig:set-context:kind
 kubectl -n argocd delete app cnoe
 task sync
@@ -804,7 +818,6 @@ kubectl get applications -n argocd -o yaml > argocd-apps-backup.yaml
 
 # Backup configuration
 cp config.yaml config-backup.yaml
-cp private/azure-credentials.json private/azure-credentials-backup.json
 
 # Restore from backup
 kubectl apply -f argocd-apps-backup.yaml
@@ -813,8 +826,8 @@ kubectl apply -f argocd-apps-backup.yaml
 ### Emergency Access
 
 ```bash
-# Direct kubectl access to services on AKS
-task kubeconfig:set-context:aks
+# Direct kubectl access to services on GKE
+task kubeconfig:set-context:gke
 kubectl port-forward svc/argocd-server -n argocd 8080:80
 kubectl port-forward svc/backstage -n backstage 3000:7007
 
@@ -837,19 +850,20 @@ kubectl cluster-info dump --output-directory=cnoe-diagnostics/kind-cluster-info
 kubectl get events -A --sort-by=.metadata.creationTimestamp > cnoe-diagnostics/kind-events.yaml
 kubectl get pods -A -o yaml > cnoe-diagnostics/kind-pods.yaml
 
-# Collect AKS cluster information
-task kubeconfig:set-context:aks
-kubectl cluster-info dump --output-directory=cnoe-diagnostics/aks-cluster-info
-kubectl get events -A --sort-by=.metadata.creationTimestamp > cnoe-diagnostics/aks-events.yaml
-kubectl get pods -A -o yaml > cnoe-diagnostics/aks-pods.yaml
+# Collect GKE cluster information
+task kubeconfig:set-context:gke
+kubectl cluster-info dump --output-directory=cnoe-diagnostics/gke-cluster-info
+kubectl get events -A --sort-by=.metadata.creationTimestamp > cnoe-diagnostics/gke-events.yaml
+kubectl get pods -A -o yaml > cnoe-diagnostics/gke-pods.yaml
 
 # Collect configuration
 task helmfile:status > cnoe-diagnostics/helmfile-status.txt
 yq '.' config.yaml > cnoe-diagnostics/config.yaml
-# DO NOT include azure-credentials.json in diagnostic bundle for security reasons
+# DO NOT include GCP service account keys in diagnostic bundle for security reasons
 
-# Collect Azure resources
-az resource list --resource-group $(yq '.resource_group' config.yaml) > cnoe-diagnostics/azure-resources.json
+# Collect GCP resources
+gcloud compute instances list --project=$(yq '.project' config.yaml) > cnoe-diagnostics/gcp-instances.json
+gcloud dns managed-zones list --project=$(yq '.project' config.yaml) > cnoe-diagnostics/gcp-dns-zones.json
 ```
 
 ### Additional Resources
@@ -862,13 +876,13 @@ az resource list --resource-group $(yq '.resource_group' config.yaml) > cnoe-dia
 
 ## Prevention Tips
 
-1. **Proper Prerequisites**: Ensure AKS cluster and DNS zone are properly provisioned before installation
-2. **Configuration Management**: Keep `config.yaml` and `azure-credentials.json` up-to-date and validate before applying changes
+1. **Proper Prerequisites**: Ensure GKE cluster, Cloud DNS zone, and Secret Manager are properly provisioned before installation
+2. **Configuration Management**: Keep `config.yaml` up-to-date and validate before applying changes
 3. **Regular Updates**: Use `task sync` to keep components updated
-4. **Monitor Resources**: Set up monitoring for both Kind and AKS cluster resources
+4. **Monitor Resources**: Set up monitoring for both Kind and GKE cluster resources
 5. **Backup Strategy**: Regular backups of critical configurations
 6. **Testing**: Test changes in a separate environment first
-7. **Infrastructure Management**: Use proper infrastructure management tools for production Azure resources
+7. **Infrastructure Management**: Use proper infrastructure management tools for production GCP resources
 8. **Docker Health**: Ensure Docker is running properly for Kind cluster operations
-9. **Network Connectivity**: Ensure reliable internet connection for image pulls and Azure API calls
-10. **Azure Permissions**: Verify service principal has necessary permissions for resource creation
+9. **Network Connectivity**: Ensure reliable internet connection for image pulls and GCP API calls
+10. **GCP Permissions**: Verify service account has necessary IAM permissions for resource creation and management
