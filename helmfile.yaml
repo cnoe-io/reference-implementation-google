@@ -1,0 +1,28 @@
+helmDefaults:
+  cleanupOnFail: true
+  createNamespace: true
+  wait: true
+
+repositories:
+  - name: argo
+    url: https://argoproj.github.io/argo-helm
+  - name: crossplane
+    url: https://charts.upbound.io/stable
+
+releases:
+  - name: argocd
+    namespace: argocd
+    chart: argo/argo-cd
+    version: '{{ ((readFile (printf "%s/%s" (requiredEnv "REPO_ROOT") "packages/addons/values.yaml")) | fromYaml).argocd.defaultVersion }}'
+    values:
+      - packages/bootstrap/argocd.yaml.gotmpl
+    suppressDiff: true
+  - name: bootstrap
+    namespace: argocd
+    chart: packages/appset-chart
+    values:
+      - packages/bootstrap/bootstrap-addons.yaml
+    disableValidationOnInstall: true
+    suppressDiff: true
+    needs:
+      - argocd/argocd

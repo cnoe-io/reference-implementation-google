@@ -1,324 +1,373 @@
 ![overview](docs/images/overview.png)
 
-> **_NOTE:_** Applications deployed in this repository are not meant or configured for production.
+> [!NOTE]
+> Applications deployed in this repository are a starting point to get environment into production.
 
-# Installation
+<!-- omit from toc -->
 
-- Installation script must be used with a GKE cluster because we use Workload Identity to talk to GCP services.
-- Components are installed as ArgoCD Applications.
-- Files under the `/packages` directory are meant to be usable without any modifications. This means certain configuration options like domain name must be passed outside of this directory. e.g. use ArgoCD's Helm parameters.
+# CNOE GCP Reference Implementation
 
-## Basic installation flow
+This repository provides a reference implementation for deploying Cloud Native Operations Enabler (CNOE) components on Google Kubernetes Engine (GKE) using GitOps principles.
 
-The installation process follows the following pattern.
+<!-- omit from toc -->
 
-1. Create a GitHub App for Backstage integration.
-2. Install ArgoCD and configure it to be able to monitor your GitHub Organization.
-3. Run Terraform. Terraform is responsible for:
-   - Managing GCP resources necessary for the Kubernetes operators to function. Mostly IAM Roles.
-   - Install components as ArgoCD applications. Pass IAM role information where necessary.
-   - Apply Kubernetes manifests such as secrets and ingress where information cannot easily be passed to ArgoCD.
-   - Run all the above in an order because installation order matters for many of these components. For example, Keycloak must be installed and ready before Backstage can be installed and configured.
+## Table of Contents
+
+- [Architecture](#architecture)
+  - [Deployed Components](#deployed-components)
+- [Important Notes](#important-notes)
+- [Prerequisites](#prerequisites)
+  - [Required Azure Resources](#required-azure-resources)
+    - [Setup Guidance for Azure Resources](#setup-guidance-for-azure-resources)
+  - [GitHub Integration Setup](#github-integration-setup)
+    - [Create GitHub App for Backstage](#create-github-app-for-backstage)
+    - [Create GitHub Token](#create-github-token)
+- [Installation Flow](#installation-flow)
+- [Security Notes](#security-notes)
+- [Installation Steps](#installation-steps)
+  - [Installation Requirements](#installation-requirements)
+  - [1. Configure the Installation](#1-configure-the-installation)
+    - [DNS and TLS Configuration](#dns-and-tls-configuration)
+      - [Automatic (Recommended)](#automatic-recommended)
+      - [Manual](#manual)
+  - [2. Install Components](#2-install-components)
+  - [3. Monitor Installation](#3-monitor-installation)
+  - [4. Get Access URLs](#4-get-access-urls)
+  - [5. Access Backstage](#5-access-backstage)
+- [Usage](#usage)
+- [Update Component Configurations](#update-component-configurations)
+  - [Backstage Templates](#backstage-templates)
+- [Uninstall](#uninstall)
+- [Contributing](#contributing)
+- [Troubleshooting](#troubleshooting)
+- [Potential Enhancements](#potential-enhancements)
+
+## Architecture
+
+- Installation is managed through **Taskfile** and **Helmfile**
+  - See [TASKFILE.md](./docs/TASKFILE.md) for information about the tasks defined in the `Taskfile.yml` file.
+- Uses a **local Kind cluster** as a bootstrap environment to deploy CNOE to the target AKS cluster
+- Components are deployed as **ArgoCD Applications**
+- Uses **Azure Workload Identity** for secure authentication to Azure services (created automatically via Crossplane)
+- Files under the `/packages` directory are meant to be usable without modifications
+- Configuration is externalised through the `config.yaml` file
+
+### Deployed Components
+
+| Component        | Version    | Purpose                        |
+| ---------------- | ---------- | ------------------------------ |
+| ArgoCD           | 8.0.14     | GitOps continuous deployment   |
+| Crossplane       | 2.0.2-up.4 | Infrastructure as Code         |
+| Ingress-nginx    | 4.7.0      | Ingress controller             |
+| ExternalDNS      | 1.16.1     | Automatic DNS management       |
+| External-secrets | 0.17.0     | Secret management              |
+| Cert-manager     | 1.17.2     | TLS certificate management     |
+| Keycloak         | 24.7.3     | Identity and access management |
+| Backstage        | 2.6.0      | Developer portal               |
+| Argo-workflows   | 0.45.18    | Workflow orchestration         |
+
+## Important Notes
+
+- **GCP Resource Management**: This repository does not manage GCP infrastructure. GKE cluster and Cloud DNS zone must be provisioned separately using your organization's infrastructure management approach.
+- **Production Readiness**: The helper tasks in this repository are for creating GCP resources for demo purposes only. Any production deployments should follow enterprise infrastructure management practices.
+- **Configuration Management**: All configuration is centralised in `config.yaml`. The `private/` directory is only for temporary files during development.
+- **Bootstrap Approach**: The installation uses a local Kind cluster to bootstrap the installation to the target GKE cluster. The Kind cluster can be deleted after installation is complete.
+
+## Prerequisites
+
+### Required GCP Resources
+
+Before using this reference implementation, you **MUST** have the following GCP resources already created and configured:
+
+1. **GKE Cluster** (1.27+) with:
+   - Workload Identity enabled
+   - Sufficient node capacity for all components
+     - For example, a demonstration GKE cluster should have nodes with at least 4 vCPUs and 16GB memory
+2. **Cloud DNS Zone**
+   - A registered domain with Cloud DNS as the authoritative DNS service
+3. **GCP Secret Manager**
+   - A Secret Manager instance for storing configuration secrets and certificates
+
+> **Important**:
+>
+> - All GCP resources must be in the same project and region
+> - GCP Secret Manager and Crossplane Workload Identity are prerequisites for secure authentication
+> - These resources must be provisioned using your organisation's preferred infrastructure management approach (Terraform, Deployment Manager, gcloud CLI, etc.). The tasks in this repository that create GCP resources are helper functions for demonstration purposes only and are **NOT recommended for production deployments**.
+
+#### Setup Guidance for GCP Resources
+
+For setting up the prerequisite GCP resources, refer to the official GCP documentation:
+
+- [Create a GKE cluster](https://cloud.google.com/kubernetes-engine/docs/how-to/creating-a-zonal-cluster)
+- [Cloud DNS zones](https://cloud.google.com/dns/docs/zones)
+- [Secret Manager](https://cloud.google.com/secret-manager/docs)
+
+### GitHub Integration Setup
+
+#### Create GitHub App for Backstage
+
+You need a GitHub App to enable Backstage integration with your GitHub organisation.
+
+**Option 1: Using Backstage CLI (Recommended)**
+
+```bash
+npx '@backstage/cli' create-github-app ${GITHUB_ORG_NAME}
+# Select appropriate permissions when prompted
+# Install the app to your organisation in the browser
+
+# Move the credentials file to a temporary location
+mkdir -p private
+GITHUB_APP_FILE=$(ls github-app-* | head -n1)
+mv ${GITHUB_APP_FILE} private/github-integration.yaml
+```
+
+**Option 2: Manual Creation**
+Follow [Backstage GitHub App documentation](https://backstage.io/docs/integrations/github/github-apps) and save the credentials as `private/github-integration.yaml`.
+
+> **Note**: The `private/` directory is for temporary files during development/testing only. All configuration must be properly stored in `config.yaml` for the actual deployment.
+
+#### Create GitHub Token
+
+Create a GitHub Personal Access Token with these permissions:
+
+- Repository access for all repositories
+- Read-only access to: Administration, Contents, and Metadata
+
+Save the token value temporarily as you will need it when creating the `config.yaml` file.
+
+## Installation Flow
+
+The installation process follows this pattern using a local Kind cluster as bootstrap:
+
+1. Configure your environment settings in `config.yaml`
+2. Set up GCP credentials (service account key)
+3. Run `task install` which:
+   - Creates a local Kind cluster using the configuration in `kind.yaml`
+   - Deploys components to Kind cluster via Helmfile as specified in `bootstrap-addons.yaml`
+   - Crossplane on Kind cluster connects to GCP and manages cloud resources:
+     - Crossplane Workload Identity
+     - Secret Manager secrets
+     - DNS records (`*.local.<domain>`) for observing local installation
+   - Deploys CNOE components to the target GKE cluster via ArgoCD
+4. Monitor installation progress via local ArgoCD at `argocd.local.<domain>` and Crossplane at `crossplane.local.<domain>`
+5. Once installation is complete, the local Kind cluster is no longer needed
 
 ```mermaid
 ---
 title: Installation Process
 ---
 erDiagram
-  "Local Machine" ||--o{ "ArgoCD" : "1. installs"
-  "Local Machine" ||--o{ "Terraform" : "2. invokes"
-  "Terraform" ||--o{ "GCP Resources" : "3. creates"
-  "Terraform" ||--o{ "ArgoCD" : "4. create ArgoCD Apps"
-  "ArgoCD" ||--o{ "This Repo" : "pulls manifests"
-  "ArgoCD" ||--o{ "Components" : "installs to the cluster"
+  "Local Machine" ||--o{ "Taskfile" : "1. executes"
+  "Taskfile" ||--o{ "Kind Cluster" : "2. creates local cluster"
+  "Taskfile" ||--o{ "Helmfile" : "3. deploys to Kind"
+  "Helmfile" ||--o{ "ArgoCD (Kind)" : "4. installs locally"
+  "ArgoCD (Kind)" ||--o{ "Crossplane (Kind)" : "5. installs"
+  "Crossplane (Kind)" ||--o{ "GCP Resources" : "6. manages"
+  "ArgoCD (Kind)" ||--o{ "GKE Cluster" : "7. deploys CNOE"
 ```
 
-This installation pattern where some Kubernetes manifests are handled in Terraform while others are handled in GitOps manner may not be suitable for many organizations. If you can be certain about parameters such as domain name and certificate handling, it is better to utilize GitOps approach where these information are committed to a repository. The reason it is handled this way is to allow for customization for different organizations without forking this repository and committing organization specific information into the repository.
+## Security Notes
 
-## Secret handling
+- GitHub App credentials contain sensitive information - handle with care
+- GCP service account credentials should be handled securely
+- Configuration secrets are stored in GCP Secret Manager
+- Workload Identity is used for secure GCP authentication
+- TLS encryption is used for all external traffic
 
-Currently handled outside of repository and set via bash script. Secrets such as GitHub token and TLS private keys are stored in the `${REPO_ROOT}/private` directory.
+## Installation Steps
 
-We may be able to use sealed secrets with full GitOps approach in the future.
+### Installation Requirements
 
-## Requirements
+- **gcloud CLI** with project access
+- **kubectl** (1.27+)
+- **gke-gcloud-auth-plugin** for GKE authentication
+- **yq** for YAML processing
+- **helm** (3.x)
+- **helmfile**
+- **task** (Taskfile executor)
+- **kind** for local Kubernetes cluster
+- **yamale** for configuration validation
+- A **GitHub Organisation** (free to create)
 
-- Github **Organization** (free to create)
-- An existing GKE cluster version (1.27+)
-- GCloud CLI (2.13+)
-- Kubectl CLI (1.27+)
-- jq
-- git
-- yq
-- curl
-- kustomize
-- node + npm (if you choose to create GitHub App via CLI)
+### 1. Configure the Installation
 
-## Create GitHub Apps for your GitHub Organization
-
-GitHub app is used to enable integration between Backstage and GitHub.
-This allows you for integration actions such as automatically importing Backstage configuration such as Organization information and templates.
-
-We strongly encourage you to create a **dedicated GitHub organization**. If you don't have an organization for this purpose, please follow [this link](https://docs.github.com/en/organizations/collaborating-with-groups-in-organizations/creating-a-new-organization-from-scratch) to create one.
-
-There are two ways to create GitHub integration with Backstage. You can use the Backstage CLI, or create it manually. See [this page](https://backstage.io/docs/integrations/github/github-apps) for more information on creating one manually. Once the app is created, place it under the private directory with the name `github-integration.yaml`.
-
-To create one with the CLI, follow the steps below. If you are using cli to create GitHub App, please make sure to select third option in the permissions prompt, if your GitHub App access needs publishing access to create GitHub repositories for your backstage templates.
+Copy and customise the configuration:
 
 ```bash
-npx '@backstage/cli' create-github-app ${GITHUB_ORG_NAME}
-# If prompted, select all for permissions or select permissions listed in this page https://backstage.io/docs/integrations/github/github-apps#app-permissions
-# In the browser window, allow access to all repositories then install the app.
-
-? Select permissions [required] (these can be changed later but then require approvals in all installations) (Press <space> to select, <a> to toggle all, <i> to invert selection,
-and <enter> to proceed)
- ◉ Read access to content (required by Software Catalog to ingest data from repositories)
- ◉ Read access to members (required by Software Catalog to ingest GitHub teams)
-❯◯ Read and Write to content and actions (required by Software Templates to create new repositories)
-
-# move it to a "private" location.
-mkdir -p private
-GITHUB_APP_FILE=$(ls github-app-* | head -n1)
-mv ${GITHUB_APP_FILE} private/github-integration.yaml
+cp config.template.yaml config.yaml
+# Edit config.yaml with your values
 ```
 
-**The file created above contains credentials. Handle it with care.**
-
-The rest of the installation process assumes the GitHub app credentials are available at `private/github-integration.yaml`
-
-If you want to delete the GitHUb application, follow [these steps](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app).
-
-## Create a GitHub token
-
-A GitHub token is needed by ArgoCD to get information about repositories under your Organization.
-
-The following permissions are needed:
-
-- Repository access for all repositories
-- Read-only access to: Administration, Contents, and Metadata.
-  Get your GitHub personal access token from: https://github.com/settings/tokens?type=beta
-
-Once you have your token, save it under the private directory with the name `github-token`. For example:
+Set up GCP credentials:
 
 ```bash
-# From the root of this repository.
-$ mkdir -p private
-$ vim private/github-token # paste your token
-# example output
-$ cat private/github-token
-github_pat_ABCDEDFEINDK....
+# Authenticate with GCP
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+
+# Create and download service account key if needed
+gcloud iam service-accounts keys create private/gcp-credentials.json \
+  --iam-account=YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com
 ```
 
-## Install
+Key configuration sections in `config.yaml`:
 
-Follow the following steps to get started.
+- `repo`: The details of the repository hosting the reference GCP implementation code
+- `cluster_name`: Your GKE cluster name
+- `project`: Your GCP project ID
+- `region`: The target GCP region
+- `dns_zone`: Your Cloud DNS zone name
+- `dns_domain`: The base domain name you will be using for exposing services
+- `secret_manager`: GCP Secret Manager name for storing configuration secrets
+- `github`: GitHub App credentials (from the [Github Integration Setup](#github-integration-setup))
 
-1. Create GitHub apps and GitHub token as described above.
-2. Create a new GKE cluster. We do not include GKE cluster in the installation module because GKE cluster requirements vary between organizations and the focus of this is integration of different projects. If you prefer, you can create a new basic cluster with the included commands:
+#### DNS and TLS Configuration
 
-   ```bash
-   gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-       --member "serviceAccount:${PROJECT_ID}-compute@developer.gserviceaccount.com" \
-       --role roles/container.nodeServiceAccount
-   ```
+##### Automatic (Recommended)
 
-   ```bash
-   gcloud beta container clusters create-auto ${GKE_CLUSTER_NAME:-cnoe-idp} \
-    --cluster-version=${GKE_VERSION} \
-    --release-channel=${GKE_RELEASE_CHANNEL:-regular} \
-    --enable-dns-access \
-    --enable-google-cloud-access \
-    --enable-master-global-access \
-    --enable-secret-manager
-   ```
+- Set your domain in `config.yaml`
+- ExternalDNS manages DNS records automatically
+- Cert-manager handles Let's Encrypt certificates
 
-3. If you don't have a public registered CloudDNS zone, [register a CloudDNS domain](https://cloud.google.com/domains/docs/register-domain) (be sure to use CloudDNS as the DNS service for the domain). We **strongly encourage creating a dedicated sub domain** for this. If you'd rather manage DNS yourself, you can set `enable_dns_management` in the config file.
-4. Get the host zone id and put it in the config file.
+##### Manual
 
-   ```bash
-   gcloud dns managed-zones list --filter "dnsName ~ ${YOUR_DOMAIN_NAME}" --format yaml | yq '.name'
-   # in the setups/config file, update the zone id.
-   hosted_zone_id:: cnoe-domain
-   ```
+- Set DNS records to point to the ingress load balancer IP
+- Provide your own TLS certificates as Kubernetes secrets
 
-5. Update the [`setups/config`](setups/config.yaml) file with your own values.
-6. Run `setups/install.sh` and follow the prompts. See the section below about monitoring installation progress.
-7. Once installation completes, navigate to `backstage.<DOMAIN_NAME>` and log in as `user1`. Password is available as a secret. You may need to wait for DNS propagation to complete to be able to login. May take ~10 minutes.
+### 2. Install Components
 
-   ```bash
-   kubectl get secrets -n keycloak keycloak-user-config -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
-   ```
-
-### Monitoring installation progress
-
-Components are installed as ArgoCD Applications. You can monitor installation progress by going to ArgoCD UI.
+If installing the reference implementation on a machine for the first time run:
 
 ```bash
-# Get the admin password
+task init
+```
+
+If you haven't previously run `task init`, then you will be prompted to install several Helm plugins required by Helmfile when you run the next command:
+
+```bash
+# Install all components
+task install
+```
+
+> **Notes**:
+>
+> - `task install` will create a local Kind cluster and use it to bootstrap the installation to your GKE cluster
+> - Post-installation, use `task apply` (the equivalent to running `helmfile apply`) to apply updates. See the [Task Usage Guidelines](docs/TASKFILE.md) for more information.
+
+### 3. Monitor Installation
+
+During installation, you can monitor progress using the local Kind cluster:
+
+```bash
+# Access local ArgoCD (running on Kind cluster)
+# Navigate to: https://argocd.local.<your-domain>
+
+# Access local Crossplane dashboard
+# Navigate to: https://crossplane.local.<your-domain>
+
+# Get ArgoCD admin password for local cluster
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+
+Once the GKE installation is complete, you can also access ArgoCD on the target cluster:
+
+```bash
+# Switch to GKE cluster context
+task kubeconfig:set-context:gke
+
+# Get ArgoCD admin password
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
-kubectl port-forward svc/argocd-server -n argocd 8081:80
+# Access ArgoCD (running on GKE cluster)
+# Navigate to: https://argocd.<your-domain>
 ```
 
-Go to [`http://localhost:8081`](http://localhost:8081) and login with the username `admin` and password obtained above. In the UI you can look at resources created, their logs, and events.
+### 4. Get Access URLs
 
-### If you installed it without automatic DNS configuration.
-
-If you set `enable_dns_management: false`, you are responsible for updating DNS records, thus external-dns is not installed. You have to set the following DNS records:
-
-- `backstage.<DOMAIN_NAME>`
-- `keycloak.<DOMAIN_NAME>`
-- `argo.<DOMAIN_NAME>`
-- `argocd.<DOMAIN_NAME>`
-
-Point these records to the value returned by the following command.
+Use the `task get:urls` command to fetch all the URLs from the target GKE cluster:
 
 ```bash
-k get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+task get:urls
 ```
 
-### If you installed it without Cert Manager.
+The URL structure of the URLs will depend on the type of routing you set in the configuration. Examples of the set of URLs that can be outputted are below:
 
-If you set `MANAGED_CERT=false`, you are responsible for managing TLS certs, thus cert-manager is not installed. You must [create TLS secrets accordingly](https://kubernetes.io/docs/concepts/services-networking/ingress/#tls).
+**Domain-based routing** (default):
 
-Run the following command to find where to create secrets.
+- Backstage: `https://backstage.YOUR_DOMAIN`
+- ArgoCD: `https://argocd.YOUR_DOMAIN`
+- Keycloak: `https://keycloak.YOUR_DOMAIN`
+- Argo Workflows: `https://argo-workflows.YOUR_DOMAIN`
+
+**Path-based routing** (set `path_routing: true`):
+
+- Backstage: `https://YOUR_DOMAIN/`
+- ArgoCD: `https://YOUR_DOMAIN/argocd`
+- Keycloak: `https://YOUR_DOMAIN/keycloak`
+- Argo Workflows: `https://YOUR_DOMAIN/argo-workflows`
+
+### 5. Access Backstage
+
+Once the Keycloak and Backstage are installed on the target GKE cluster, check you can login to the Backstage UI with a default user:
 
 ```bash
-output=$(kubectl get ingress --all-namespaces -o json | jq -r '.items[] | "\(.metadata.namespace) \(.spec.rules[].host) \(.spec.tls[].secretName)"')
-echo -e "Namespace \t Hostname \t TLS Secret Name"
-echo -e "$output"
+# Switch to GKE cluster context
+task kubeconfig:set-context:gke
+
+# Get user password
+kubectl -n keycloak get secret keycloak-config -o yaml | yq '.data.USER1_PASSWORD | @base64d'
 ```
 
-Secret format should be something like:
+## Usage
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: backstage.<DOMAIN>
-  namespace: backstage
-data:
-  tls.crt: <base64 encoded cert>
-  tls.key: <base64 encoded key>
-type: kubernetes.io/tls
-```
+See [DEMO.md](docs/DEMO.md) for information on how to navigate the platform and for usage examples.
 
-## What was created?
+## Update Component Configurations
 
-The following components are installed if you chose the full installation option.
+If you want to try customising component configurations, you can do so by updating the `packages/addons/values.yaml` file and using `task sync` to apply the updates.
 
-| Name             | Version |
-| ---------------- | ------- |
-| argo-workflows   | v3.4.8  |
-| argocd           | v2.7.6  |
-| backstage        | v1.16.0 |
-| cert-manager     | v1.12.2 |
-| crossplane       | v1.12.2 |
-| external-dns     | v0.13.5 |
-| ingress-nginx    | v1.8.0  |
-| keycloak         | v22.0.0 |
-| external-secrets | v0.9.2  |
+### Backstage Templates
 
-### Things created outside of the cluster
-
-If full installation is done, you should have these DNS entries available. They all point to the Network Load Balancer.
-
-- `backstage.<DOMAIN_NAME>`
-- `argo.<DOMAIN_NAME>`
-- `keycloak.<DOMAIN_NAME>`
-
-You can confirm these by querying at a register.
-
-```bash
-dig A `backstage.<DOMAIN_NAME>` @1.1.1.1
-
-kubectl get svc -n ingress-nginx
-```
-
-A GCP Load Balancer is also created. This is managed by the Kubernetes Service and points to ingress-nginx pod. This pod is responsible for routing requests to correct places. As a result, HTTPS endpoints are created with valid certificates.
-
-```bash
-openssl s_client -showcerts -servername id.<DOMAIN_NAME> -connect id.<DOMAIN_NAME>:443 <<< "Q"
-curl https://backstage.<DOMAIN_NAME>
-```
-
-## How to access the Backstage instance?
-
-When you open a browser window and go to `https://backstage.<DOMAIN_NAME>`, you should be prompted to login.
-Two users are created during the installation process: `user1` and `user2`. Their passwords are available in the keycloak namespace.
-
-```bash
-k get secrets -n keycloak keycloak-user-config -o go-template='{{range $k,$v := .data}}{{printf "%s: " $k}}{{if not $v}}{{$v}}{{else}}{{$v | base64decode}}{{end}}{{"\n"}}{{end}}'
-```
+Backstage templates can be found in the `templates/` directory
 
 ## Uninstall
 
-1. Run `setups/uninstall.sh` and follow the prompts.
-2. Remove GitHub app from your Organization by following [these steps](https://docs.github.com/en/apps/maintaining-github-apps/deleting-a-github-app).
-3. Remove token from your GitHub Organization by following [these steps](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/reviewing-and-revoking-personal-access-tokens-in-your-organization).
-4. Remove the created GitHub Organization.
+```bash
+# Remove all components and clean up GCP resources
+task uninstall
 
-<details>
-    <summary>Uninstall details</summary>
+# Clean up GitHub App and tokens manually
+# Delete the GitHub organisation if no longer needed
+```
 
-### Resources deleted
+> **Note**: The `task uninstall` command will clean up both the local Kind cluster and remove CNOE components from the target GKE cluster. GCP resources managed by Crossplane will also be cleaned up automatically.
 
-Currently resources created by applications are not deleted. For example, if you have Spark Jobs running, they are not deleted and may block deletion of the spark-operator app.
+## Contributing
 
-</details>
+This reference implementation is designed to be:
 
-## What can you do in Backstage?
-
-See [this doc](./demo.md) for demos!
-
-## Possible issues
-
-### Cert-manager
-
-- by default it uses http-01 challenge. If you'd prefer using dns-01, you can update the ingress files. TODO AUTOMATE THIS
-- You may get events like `Get "http://<DOMAIN>/.well-known/acme-challenge/09yldI6tVRvtWVPyMfwCwsYdOCEGGVWhmb1PWzXwhXI": dial tcp: lookup <DOMAIN> on 10.100.0.10:53: no such host`. This is due to DNS propagation delay. It may take ~10 minutes.
+- **Forkable**: Create your own version for your organisation
+- **Customizable**: Modify configurations without changing core packages
+- **Extensible**: Add new components following the established patterns
 
 ## Troubleshooting
 
-See [the troubleshooting doc](TROUBLESHOOTING.md) for more information.
+See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues and detailed troubleshooting steps.
 
-## Creation Order notes
+## Potential Enhancements
 
-<details>
-    <summary>Click to expand</summary>
+The installation of this GCP reference implementation will give you a starting point for the platform, however as previously stated applications deployed in this repository are not meant or configured for production. To push it towards production ready, you can make further enhancements that could include:
 
-## Things created outside of the cluster with Keycloak SSO enabled.
-
-- CloudDNS records. CloudDNS hosted zones are not created. You must also register it if you want to be able to access through public DNS. These are managed by the external DNS controller.
-
-- GCP Load Balancer. This is just the entrance to the Kubernetes cluster. This points to the default installation of Ingress Nginx.
-
-- TLS Certificates issued by Let's Encrypt. These are managed by cert-manager based on values in Ingress. They use the production issuer which means we must be very careful with how many and often we request certificates from them. The uninstall scripts backup certificates to the `private` directory to avoid re-issuing certificates.
-
-These resources are controlled by Kubernetes controllers and thus should be deleted using controllers.
-
-### Keycloak SSO with DNS and TLS certificates
-
-If using keycloak SSO with fully automated DNS and certificate management, it must be:
-
-1. ingress-nginx
-2. cert-manager
-3. external-dns
-4. keycloak
-5. The rest of stuff
-
-### Keycloak SSO with manual DNS and TLS Certificates
-
-If using keycloak SSO but manage DNS records and certificates manually.
-
-1. ingress-nginx
-2. The rest of stuff minus cert-manager and external-dns
-
-In this case, you can issue your own certs and provide them as TLS secrets as specified in the `spec.tls[0].secretName` field of Ingress objects.
-You can also let NLB or ALB terminate TLS instead using the LB controller. This is not covered currently, but possible.
-
-### No SSO
-
-If no SSO, no particular installation order. Eventual consistency works.
-
-</details>
+1. Modifying the basic and Argo workflow templates for your specific GCP use cases
+2. Integrating additional GCP services with Crossplane (Cloud Storage, Cloud SQL, Pub/Sub, etc.)
+3. Configuring auto-scaling for GKE and GCP resources
+4. Adding OPA Gatekeeper for governance
+5. Integrating a monitoring stack. For example:
+   1. Deploy Prometheus and Grafana
+   2. Configure service monitors for GCP resources
+   3. View metrics and GCP resource status in Backstage
+   4. Integrate with Google Cloud Monitoring (formerly Stackdriver)
+6. Implementing GitOps-based environment promotion:
+   1. **Development**: Deploy to dev environment via Git push
+   2. **Testing**: Promote to test environment via ArgoCD
+   3. **Production**: Use ArgoCD sync waves for controlled rollout

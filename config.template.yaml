@@ -1,0 +1,52 @@
+### Config for CNOE GCP Reference Implementation ###
+# Source: "https://github.com/livewyer-ops/reference-implementation-google"
+
+# Details of your repository hosting the reference azure implementation code
+repo:
+  url: "https://github.com/<REPLACE_ME_your_org>/reference-implementation-google"
+  revision: "main" # Branch or Tag which should be used for Argo CD Apps
+  basepath: "packages" # Directory in which configuration of addons is stored
+
+# The name of the GKE cluster you are installing the reference implementation on.
+cluster_name: "cnoe-ref-impl"
+# GCP Region of the GKE cluster and cnoe-reference-implementation-google config secret
+project: cnoe-idp
+region: us-east1
+
+# Base Domain name used for exposing services. It should be a subdomain or main domain of the DNS zone.
+dns_zone: <REPLACE_ME_cnoe-dns>
+dns_domain: <REPLACE_ME_example.com>
+
+# GCP Secret Manager to use to store config secrets and certs
+secret_manager: cnoe-ref-impl
+
+# Set this to "true" if you want to enable path routing othewise "false" for domain based routing.
+# When enabled, the exposed addons will be accessible at https://<domain_name>/<addon-name>
+# When disabled, the exposed addons will be accessible at https://<addon-name>.<domain_name>
+# !!! Note: This is a string value as it is passed on to the Argo CD cluster secret as label
+path_routing: false
+
+github:
+  appId: "<REPLACE_ME_12345678>"
+  installationId: "<REPLACE_ME_12345678>"
+  orgURL: https://github.com/<REPLACE_ME_your_org>
+  clientId: <REPLACE_ME_clientId>
+  clientSecret: <REPLACE_ME_clientSecret>
+  webhookUrl: <REPLACE_ME_webhookUrl>
+  webhookSecret: <REPLACE_ME_webhookSecret>
+  privateKey: |
+    -----BEGIN RSA PRIVATE KEY-----
+    ...
+    -----END RSA PRIVATE KEY-----
+
+letsencrypt_env: prod
+
+# Tags for GCP resources
+tags:
+  githubRepo: "github.com/<REPLACE_ME_your_org>/reference-implementation-azure"
+  env: "dev"
+  project: "cnoe"
+
+crossplane_workload_identity:
+  clientId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>
+  tenantId: <REPLACE_ME_00000000-0000-0000-0000-000000000000>

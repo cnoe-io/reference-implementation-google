@@ -1,0 +1,38 @@
+workflow:
+  serviceAccount:
+    create: false
+  rbac:
+    create: false
+server:
+  ingress:
+    enabled: true
+    ingressClassName: "nginx"
+    pathType: ImplementationSpecific
+    annotations:
+      external-dns.alpha.kubernetes.io/ttl: "60"
+  sso:
+    enabled: true
+    insecureSkipVerify: true
+    clientId: # Required for sso configuration
+      name: keycloak-oidc
+      key: ARGO_WORKFLOWS_CLIENT_ID
+    clientSecret:
+      name: keycloak-oidc
+      key: ARGO_WORKFLOWS_CLIENT_SECRET
+    scopes:
+      - openid
+      - profile
+      - email
+      - groups
+    rbac:
+      enabled: true
+  volumes:
+    - name: secret-dependency
+      secret:
+        secretName: keycloak-oidc
+  volumeMounts: # explicit declaring dependency on external secret
+    - name: secret-dependency
+      mountPath: /do-not-use
+  extraArgs:
+    - --auth-mode=client
+    - --auth-mode=sso # Required for sso configuration

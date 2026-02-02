@@ -1,0 +1,102 @@
+{{- $config := (readFile "../../config.yaml") | fromYaml -}}
+{{- $credentials :=  (readFile "../../private/gcp-credentials.json") | fromJson -}}
+
+dex:
+  enabled: false
+
+configs:
+  params:
+    server.insecure: true
+
+server:
+  ingress:
+    enabled: true
+    hostname: argocd.local.{{ $config.dns_domain }}
+
+extraObjects:
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: cnoe-bootstrap
+      labels:
+        argocd.argoproj.io/secret-type: cluster
+        cnoe.io/cluster: bootstrap
+        environment: "control-plane"
+      annotations:
+        addonsRepoURL: {{ $config.repo.url }}
+        addonsRepoRevision: {{ $config.repo.revision }}
+        addonsRepoBasepath: {{ $config.repo.basepath }}
+        project: {{ $config.project }}
+        region: {{ $config.region }}
+        clusterName: {{ $config.cluster_name }}
+        dnsZone: {{ $config.dns_zone }}
+        domain: {{ $config.dns_domain }}
+        secretManager: {{$config.secret_manager}}
+        pathRouting: "{{ $config.path_routing }}"
+        environment: "control-plane"
+        letsencryptEnv: "{{ $config.letsencrypt_env }}"
+        gcpServiceAccount: "{{ $credentials.client_email }}"
+    stringData:
+      name: "{{ $config.cluster_name }}-bootstrap"
+      server: https://kubernetes.default.svc
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: github-app-org
+      labels:
+        argocd.argoproj.io/secret-type: repo-creds
+    stringData:
+      type: git
+      url: {{ $config.github.orgURL }}
+      githubAppID: "{{ $config.github.appId }}"
+      githubAppInstallationID: "{{ $config.github.installationId }}"
+      githubClientID: {{ $config.github.clientId }}
+      githubClientSecret: "{{ $config.github.clientSecret }}"
+      {{ if $config.github.webhookUrl -}}
+      githubWebhookURL: {{ $config.github.webhookUrl }}
+      {{ end -}}
+      {{ if $config.github.webhookSecret }}
+      githubWebhookSecret: {{ $config.github.webhookSecret }}
+      {{ end -}}
+      githubAppPrivateKey: |
+        {{ $config.github.privateKey | nindent 8 }}
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: cnoe-config
+      namespace: argocd
+    stringData:
+      config.json: |
+        {{ $config | toJson }}
+      projectId: {{ $credentials.project_id }}
+      clientEmail: {{ $credentials.client_email }}
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: gcp-serviceaccount
+    stringData:
+      credentials.json: |
+        {{ $credentials | toJson }}
+
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: crossplane-system
+
+  - apiVersion: v1
+    kind: Secret
+    type: Opaque
+    metadata:
+      name: provider-gcp
+      namespace: crossplane-system
+    stringData:
+      credentials: |
+        {{ $credentials | toJson }}

@@ -1,0 +1,24 @@
+# YAML Schema for config.yaml
+
+repo:
+  url: str()
+  revision: str()
+  basepath: str()
+cluster_name: str()
+project: str()
+region: str()
+dns_zone: str()
+dns_domain: str()
+secret_manager: str()
+path_routing: bool()
+github:
+  appId: regex('^[0-9]+$')
+  installationId: regex('^[0-9]+$')
+  orgURL: regex('^http(s?)://.*$')
+  clientId: regex('^[a-zA-Z0-9]+$')
+  clientSecret: regex('^[a-zA-Z0-9]{32,}')
+  webhookUrl: regex('^http(s?)://.*$')
+  webhookSecret: str()
+  privateKey: str(multiline=True)
+letsencrypt_env: enum('prod', 'staging')
+tags: map(str(), key=str())

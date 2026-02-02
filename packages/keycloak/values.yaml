@@ -1,0 +1,46 @@
+image:
+  repository: bitnamilegacy/keycloak
+keycloakConfigCli:
+  image:
+    repository: bitnamilegacy/keycloak-config-cli
+
+adminRealm: "cnoe"
+production: true
+usePasswordFiles: false
+proxyHeaders: "forwarded"
+
+global:
+  security:
+    allowInsecureImages: true
+  defaultStorageClass: standard-rwo
+
+auth:
+  adminUser: cnoe-admin
+  adminPassword: cnoe-admin
+  existingSecret: keycloak-config
+  passwordSecretKey: KEYCLOAK_ADMIN_PASSWORD
+
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  hostnameStrict: true
+  servicePort: http
+  annotations:
+    external-dns.alpha.kubernetes.io/ttl: "60"
+  tls: false
+
+postgresql:
+  enabled: true
+  image:
+    repository: bitnamilegacy/postgresql
+  global:
+    security:
+      allowInsecureImages: true
+    defaultStorageClass: standard-rwo
+  auth:
+    username: keycloak
+    database: keycloak
+    existingSecret: "keycloak-config"
+    secretKeys:
+      userPasswordKey: POSTGRES_PASSWORD
+  architecture: standalone

@@ -1,0 +1,101 @@
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: cnoe-kubeconfig
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: argocd
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          namespace: argocd
+          key: ca.crt
+      auth:
+        serviceAccount:
+          name: argocd-server
+          namespace: argocd
+
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: cnoe-kubeconfig
+  namespace: argocd
+spec:
+  refreshInterval: 1m
+  secretStoreRef:
+    name: cnoe-kubeconfig
+    kind: ClusterSecretStore
+  target:
+    name: cnoe
+    template:
+      engineVersion: v2
+      type: Opaque
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: cluster
+          cnoe.io/cluster: cnoe
+          environment: "control-plane"
+        annotations:
+          cnoe.io/cluster: cnoe
+          environment: "control-plane"
+          addonsRepoURL: "{{ (fromJson .config).repo.url }}"
+          addonsRepoRevision: "{{ (fromJson .config).repo.revision }}"
+          addonsRepoBasepath: "{{ (fromJson .config).repo.basepath }}"
+          project: "{{ (fromJson .config).project }}"
+          region: "{{ (fromJson .config).region }}"
+          clusterName: "{{ (fromJson .config).cluster_name }}"
+          dnsZone: "{{ (fromJson .config).dns_zone }}"
+          domain: "{{ (fromJson .config).dns_domain }}"
+          secretManager: "{{ (fromJson .config).secret_manager }}"
+          letsencryptEnv: "{{ (fromJson .config).letsencrypt_env }}"
+          pathRouting: "{{ (fromJson .config).path_routing }}"
+          githubOrgUrl: "{{ (fromJson .config).github.orgURL }}"
+          githubAppID: "{{ (fromJson .config).github.appId }}"
+          githubAppInstallationID: "{{ (fromJson .config).github.installationId }}"
+          githubClientID: "{{ (fromJson .config).github.clientId }}"
+          githubClientSecret: "{{ (fromJson .config).github.clientSecret }}"
+          githubWebhookURL: '{{ default "" (fromJson .config).github.webhookUrl }}'
+          githubWebhookSecret: '{{ default "" (fromJson .config).github.webhookSecret }}'
+          githubAppPrivateKey: |
+            {{ (fromJson .config).github.privateKey }}
+      data:
+        name: cnoe
+        server: "{{ (first (fromYaml .kubeconfig).clusters).cluster.server }}"
+        config: |
+          {{ toJson (dict
+            "kubeconfig" (fromYaml .kubeconfig)
+            "tlsClientConfig" (dict
+              "insecure" false
+              "caData" (get (first (fromYaml .kubeconfig).clusters).cluster "certificate-authority-data")
+            )
+            "execProviderConfig" (dict
+              "apiVersion" "client.authentication.k8s.io/v1beta1"
+              "command" "argocd-k8s-auth"
+              "args" (list "gcp")
+              "env" (dict
+                "GOOGLE_APPLICATION_CREDENTIALS" "/var/run/secrets/gcp/credentials.json"
+              )
+            )
+          ) }}
+  data:
+    - secretKey: kubeconfig
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-kubeconfig
+        property: kubeconfig
+    - secretKey: config
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: Auto
+        metadataPolicy: None
+        key: cnoe-config
+        property: "config.json"

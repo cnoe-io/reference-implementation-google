@@ -1,0 +1,88 @@
+# Github App Secret for ArgoCD
+
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  name: github-app-org
+  namespace: argocd
+spec:
+  refreshInterval: "15m"
+  secretStoreRef:
+    name: gcp-secretmanager
+    kind: ClusterSecretStore
+  target:
+    name: github-app-org
+    template:
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repo-creds
+      data:
+        type: git
+        url: "{{ .url }}"
+        githubAppID: "{{ .githubAppID }}"
+        githubAppInstallationID: "{{ .githubAppInstallationID }}"
+        githubClientID: "{{ .githubClientID }}"
+        githubClientSecret: "{{ .githubClientSecret }}"
+        githubWebhookURL: "{{ .githubWebhookURL }}"
+        githubWebhookSecret: "{{ .githubWebhookSecret }}"
+        githubAppPrivateKey: |
+          {{ .githubAppPrivateKey }}
+  data:
+    - secretKey: url
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.orgURL
+    - secretKey: githubAppID
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.appId
+    - secretKey: githubAppInstallationID
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.installationId
+    - secretKey: githubClientID
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.clientId
+    - secretKey: githubClientSecret
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.clientSecret
+    - secretKey: githubWebhookSecret
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.webhookSecret
+    - secretKey: githubWebhookURL
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.webhookUrl
+    - secretKey: githubAppPrivateKey
+      remoteRef:
+        conversionStrategy: Default
+        decodingStrategy: None
+        key: config
+        metadataPolicy: None
+        property: github.privateKey

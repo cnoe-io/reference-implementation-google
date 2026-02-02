@@ -1,0 +1,4 @@
+sources:
+  - ingress
+txtOwnerId: cnoe-external-dns
+policy: sync

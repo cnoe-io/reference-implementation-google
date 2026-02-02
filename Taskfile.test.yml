@@ -1,0 +1,19 @@
+# https://taskfile.dev
+version: "3"
+
+tasks:
+  test:gke:create:
+    deps:
+      - task: gcp:init
+    env:
+      KUBECONFIG:
+        sh: echo ${HOME}/.kube/config
+    cmds:
+      - gcloud container clusters create-auto "$(yq '.cluster_name' {{.CONFIG_FILE}})" --enable-dns-access
+      - gcloud container clusters get-credentials "$(yq '.cluster_name' {{.CONFIG_FILE}})"
+
+  test:gke:destroy:
+    deps:
+      - task: gcp:init
+    cmds:
+      - gcloud container clusters delete "$(yq '.cluster_name' {{.CONFIG_FILE}})" --quiet

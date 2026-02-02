@@ -1,0 +1,104 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-init
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+spec:
+  template:
+    metadata:
+      generateName: keycloak-init
+    spec:
+      serviceAccountName: keycloak
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      volumes:
+        - name: kc-config
+          configMap:
+            name: keycloak-init-config
+        - name: kc-export
+          emptyDir:
+            sizeLimit: 10Mi
+      initContainers:
+        - name: keycloak-config
+          image: docker.io/bitnamilegacy/keycloak:26.3.3
+          volumeMounts:
+            - name: kc-config
+              mountPath: "/config"
+              readOnly: true
+            - mountPath: /export
+              name: kc-export
+          envFrom:
+            - configMapRef:
+                name: keycloak-client-url
+            - secretRef:
+                name: keycloak-config
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              #! /bin/bash
+              set -e -o pipefail
+
+              KC_ADMIN=cnoe-admin
+              KC_REALM=cnoe
+              KC_CONFIG=/config
+              KC_AUTH=/tmp/kcadmn.cfg
+              KCADM_ARGS="-x --config ${KC_AUTH}"
+
+              trap 'catch $? $LINENO' ERR
+              catch() {
+                echo "FAILED: Error $1 occurred at line $2"
+              }
+
+              curl -Lfs -o /tmp/envsubst https://github.com/a8m/envsubst/releases/download/v1.4.3/envsubst-Linux-x86_64 && chmod +x /tmp/envsubst
+
+              echo "INFO: Logging in ..."
+              kcadm.sh config credentials ${KCADM_ARGS} --server "${KEYCLOAK_URL}" --realm "${KC_REALM}" --user "${KC_ADMIN}" --password "${KEYCLOAK_ADMIN_PASSWORD}"
+
+              for SCOPE in client-scopes groups users clients; do
+                echo "INFO: Creating ${SCOPE} ..."
+                for SRC in ${KC_CONFIG}/${SCOPE}-*.json; do
+                  /tmp/envsubst < ${SRC} > /tmp/$(basename ${SRC})
+                  kcadm.sh create ${SCOPE} ${KCADM_ARGS} -r "${KC_REALM}" -f /tmp/$(basename ${SRC}) \
+                    && echo "INFO: ${SCOPE} created from ${SRC}" || echo "WARN: ${SCOPE} ${SRC} already exists?"
+                done
+              done
+
+              echo "INFO: SUCCESS! Keycloak configured!"
+
+              echo "INFO: Exporting Keycloak client secrets..."
+              for CLIENT in ${KC_CONFIG}/clients-*.json; do
+                BASENAME=$(basename ${CLIENT})
+                CLIENTID=$(echo ${BASENAME%%\.json} | sed -e "s/clients-//g")
+                ID=$(kcadm.sh get clients ${KCADM_ARGS} --format csv --noquotes -r "${KC_REALM}" -q clientId=${CLIENTID} --fields id)
+                kcadm.sh get clients/${ID} ${KCADM_ARGS} -r "${KC_REALM}" --fields clientId,secret > /export/${CLIENTID}.json
+                echo "INFO: ${CLIENTID} client secret exported"
+              done
+              echo "INFO: SUCCESS! Client Secret export completed!"
+      containers:
+        - name: keycloak-export
+          image: alpine/kubectl
+          volumeMounts:
+            - mountPath: /export
+              name: kc-export
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              #! /bin/sh
+              set -e -o pipefail
+
+              trap 'catch $? $LINENO' ERR
+              catch() {
+                echo "FAILED: Error $1 occurred at line $2"
+              }
+
+              echo "INFO: Importing Keycloak OIDC client secrets ..."
+              for SECRET in $(ls /export/*.json); do
+                BASENAME=$(basename ${SECRET})
+                CLIENT=${BASENAME%%\.json}
+                kubectl -n keycloak create secret generic oidc-client-${CLIENT} --from-file=secret=${SECRET} \
+                  && echo "INFO: Keycloak OIDC client ${CLIENT} secret imported" || echo "WARN: secret keycloak/oidc-client-${CLIENT} already exists?"
+
+              done
+              echo "INFO: SUCCESS! Keycloak OIDC Client Secret import completed!"
